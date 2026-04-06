@@ -1,0 +1,31 @@
+# モノシリ - 依存ライブラリ
+# pip install -r requirements.txt
+
+# ─── UI ───────────────────────────────────────────────────────
+streamlit>=1.40.0
+
+# ─── ベクトルDB ───────────────────────────────────────────────
+chromadb>=0.5.0
+
+# ─── Embeddingモデル（常時ローカル）──────────────────────────
+sentence-transformers>=3.0.0
+
+# ─── ローカルLLM推論 ──────────────────────────────────────────
+# CPU推論版（GPU版は別途インストール）
+# GPU（CUDA）を使う場合: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+llama-cpp-python>=0.3.0
+
+# ─── ファイルテキスト抽出 ──────────────────────────────────────
+PyMuPDF>=1.24.0          # PDF
+python-docx>=1.1.0       # Word (.docx)
+python-pptx>=1.0.0       # PowerPoint (.pptx)
+openpyxl>=3.1.0          # Excel (.xlsx)
+
+# ─── テキスト分割 ─────────────────────────────────────────────
+langchain-text-splitters>=0.3.0
+
+# ─── モデルダウンロード ───────────────────────────────────────
+huggingface_hub>=0.25.0
+
+# ─── システム情報 ─────────────────────────────────────────────
+psutil>=5.9.0
