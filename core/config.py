@@ -114,22 +114,21 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 # チャンク設定
 # 日本語は1トークン≒2文字のため、500〜800トークン ≒ 1000〜1600文字
 CHUNK_SIZE = 1200       # 文字数
-CHUNK_OVERLAP = 300     # オーバーラップ文字数（200→300: 表見出し行の引き継ぎ改善）
+CHUNK_OVERLAP = 500     # オーバーラップ文字数（300→500: CHUNK-001 テーブル行境界分割の緩和）
 
 # ChromaDB コレクション名
 CHROMA_COLLECTION = "monoshiri_docs"
 
 # ─── モデル別推論パラメータ ──────────────────────────────────────
-# ADR-002修正: MAX_TOKENSをモデル別に設定
-# Qwen2.5系は社内文書RAGに1024トークンで十分（4096は過大で遅くなる原因）
-# BUG-014修正: Qwen3.5もthinking=Falseで運用するため1024に統一
+# SPEED修正: MAX_TOKENSを512に削減（VRAM 8GB最適化）
+# 社内文書RAGの典型回答は100〜300トークン。512で十分かつ生成速度が倍近くなる。
+# 1024は「長い説明が必要な質問」にのみ使用。
 LLM_MODEL_MAX_TOKENS: dict[str, int] = {
-    "Qwen2.5-14B-Instruct Q4_K_M（高精度・推奨）": 1024,
-    "Qwen2.5-7B-Instruct Q4_K_M（標準・推奨）": 1024,
-    "Qwen2.5-3B-Instruct Q4_K_M（軽量）": 512,
-    # BUG-014修正: thinking=False なので4096は不要。1024で十分かつハルシネーション抑制。
-    "Qwen3.5-9B Q4_K_M（高性能・最新）": 1024,
-    "Nemotron-Nano-9B-v2-Japanese Q4_K_M（日本語特化）": 1024,
+    "Qwen2.5-14B-Instruct Q4_K_M（高精度・推奨）": 512,
+    "Qwen2.5-7B-Instruct Q4_K_M（標準・推奨）": 512,   # SPEED推奨モデル
+    "Qwen2.5-3B-Instruct Q4_K_M（軽量）": 384,
+    "Qwen3.5-9B Q4_K_M（高性能・最新）": 512,
+    "Nemotron-Nano-9B-v2-Japanese Q4_K_M（日本語特化）": 512,
 }
 
 # ─── Free層制限 ──────────────────────────────────────────────────
@@ -157,7 +156,7 @@ MAX_EVIDENCE = 10
 # ADR-002修正: 30 → 15 に削減
 #   フォールバック廃止によりノイズ対策が不要になった。
 #   チャンク数削減でLLMへのコンテキスト品質向上 & 推論速度改善。
-TOP_K = 15
+TOP_K = 8   # SPEED-007: 15→8（チャンク品質向上により件数削減でもコンテキスト品質を維持）
 
 # LLM回答生成の最大トークン数（デフォルト）
 # ADR-002修正: モデル別設定（LLM_MODEL_MAX_TOKENS）を優先使用。
@@ -194,7 +193,7 @@ GGUF_DIRECT_URLS: dict[str, str] = {
 #   Qwen3.5-9B が大きなコンテキストで thinking mode に入り、タイムアウトが発生する問題を解消。
 #   3000文字 ≈ 1500トークン。システムプロンプト(600) + ユーザーメッセージ(300) + コンテキスト(1500)
 #   合計 ~2400トークンで、Qwen3.5の実効コンテキスト長(4096)に余裕を持って収まる。
-RAG_CONTEXT_MAX_LENGTH = 3000
+RAG_CONTEXT_MAX_LENGTH = 1500  # SPEED-006: 3000→1500（prefill高速化・n_ctx=2048に余裕を持たせる）
 
 # ─── GPU設定 ──────────────────────────────────────────────────
 # LLM推論のGPUオフロード層数
@@ -246,4 +245,4 @@ def load_config() -> dict:
 def save_config(config: dict) -> None:
     """設定を保存する"""
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        j
+        json.dump(config, f, ensure_ascii=False, indent=2)
