@@ -12,19 +12,16 @@ from pathlib import Path
 APP_DIR = Path(__file__).parent.parent
 
 # データ保存先
-# Windows: %APPDATA%\monoshiri
-# その他:  ~/.monoshiri
+# 常に ~/.monoshiri を使用する（全OS共通）
+# 理由: Windowsでの %APPDATA% 使用時に既存データ (~/.monoshiri) と分離してしまう問題を解消。
+#       旧バージョンのデータ (chroma/, hashes/) もこのパスに存在する。
 def _get_data_dir() -> Path:
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "monoshiri"
     return Path.home() / ".monoshiri"
 
 DATA_DIR = _get_data_dir()
-CHROMA_DIR = DATA_DIR / "index"          # v3.4: %APPDATA%/monoshiri/index/
-CACHE_DIR  = DATA_DIR / "cache"          # v3.4: %APPDATA%/monoshiri/cache/
-LOGS_DIR   = DATA_DIR / "logs"           # v3.4: %APPDATA%/monoshiri/logs/
+CHROMA_DIR = DATA_DIR / "chroma"         # 旧バージョンの実データに合わせて "chroma" に統一
+CACHE_DIR  = DATA_DIR / "cache"
+LOGS_DIR   = DATA_DIR / "logs"
 MODELS_DIR = DATA_DIR / "models"
 HISTORY_FILE      = DATA_DIR / "history.json"
 CONFIG_FILE       = DATA_DIR / "config.json"
