@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws lambda:*)",
+      "Bash(aws secretsmanager:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(aws s3:*)",
+      "Bash(python3 -c \"import tempfile; print\\(tempfile.gettempdir\\(\\)\\)\")",
+      "Bash(aws events:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
+    ]
+  }
+}

@@ -92,7 +92,13 @@ def extract_text(file_path: Path) -> tuple[list[dict], str | None]:
 
 
 def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
-    """PyMuPDFを使いページごとにテキスト抽出"""
+    """PyMuPDFを使いページごとにテキスト抽出
+
+    BUG-027修正: get_text("text") → get_text("blocks") + 座標ソート
+    財務PDFの表構造（年度×指標）を保持するため、テキストブロックをY座標→X座標順に
+    ソートし直す。これにより列単位での誤抽出を防ぎ、行単位の自然読み順を保持する。
+    round(b[1] / 10) でY座標を10px単位に丸め、同一行の左右ブロックをX座標で並べる。
+    """
     import fitz  # PyMuPDF
 
     page_chunks = []
@@ -100,7 +106,14 @@ def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
-            text = page.get_text("text").strip()
+            # blocks = [(x0, y0, x1, y1, text, block_no, block_type), ...]
+            blocks = page.get_text("blocks")
+            # テキストブロック(block_type==0)のみ、Y→X座標順でソート
+            text_blocks = sorted(
+                [b for b in blocks if b[6] == 0],
+                key=lambda b: (round(b[1] / 10), b[0])  # 行単位(10px)でY→X
+            )
+            text = "\n".join(b[4].strip() for b in text_blocks if b[4].strip())
             if text:
                 page_chunks.append({
                     "text": text,
@@ -224,27 +237,4 @@ def scan_folder(folder_path: Path) -> list[Path]:
     """
     files: list[Path] = []
     try:
-        for f in folder_path.rglob("*"):
-            # 隠しファイル・フォルダをスキップ
-            if any(part.startswith(".") for part in f.parts):
-                continue
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
-                files.append(f)
-    except PermissionError as e:
-        logger.warning(f"アクセス権限なし: {folder_path} — {e}")
-
-    return sorted(files)
-
-
-def estimate_index_time(file_count: int) -> str:
-    """ファイル数から処理時間を見積もる（目安）"""
-    if file_count == 0:
-        return "0秒"
-    # 経験則: 1ファイル約2秒（Embedding含む）
-    seconds = file_count * 2
-    if seconds < 60:
-        return f"約{seconds}秒"
-    elif seconds < 3600:
-        return f"約{seconds // 60}分"
-    else:
-        return f"約{seconds // 3600}時間{(seconds % 3600) // 60}分"
+        for f in folder_path.rg
