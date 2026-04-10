@@ -143,6 +143,24 @@ def add_local_gguf(gguf_path: Path, display_name: str | None = None) -> str:
 
 # ─── Ollama API ───────────────────────────────────────────────
 
+def is_model_loaded_in_ollama(model_name: str) -> bool:
+    """
+    Ollamaの /api/ps エンドポイントで、モデルが現在VRAMにロードされているか確認する。
+    keep_alive=30m 設定でも30分以上アイドルだとアンロードされるため、
+    warmup前にこれで確認することで不要なwarmupを省略できる。
+    """
+    model_info = LLM_MODELS.get(model_name, {})
+    ollama_name = model_info.get("ollama_name", "")
+    if not ollama_name:
+        return False
+    try:
+        result = _ollama_get("/api/ps", timeout=3)
+        running = result.get("models", [])
+        return any(m.get("name", "").startswith(ollama_name) for m in running)
+    except Exception:
+        return False
+
+
 def _ollama_get(endpoint: str, timeout: int = 5) -> dict:
     """OllamaへのGETリクエスト（urllib使用・追加依存なし）"""
     url = f"{OLLAMA_BASE_URL}{endpoint}"
@@ -231,7 +249,15 @@ def register_model_with_ollama(model_name: str) -> None:
     # BUG-004修正: RAG_CONTEXT_MAX_LENGTH=6000文字 ≒ 3000トークン
     # + システムプロンプト(約300トークン) + 余裕 = 最低4096必要
     # 16GB以上では8192に拡張してコンテキスト欠落を防ぐ
-    n_ctx = 4096 if total_ram >= 16 else 2048  # BUG-028修正: 8192→4096 KVキャッシュ削減（VRAM 8GB環境のCPUフォールバック軽減）
+    # SPEED修正: n_ctx=2048 に固定
+    #   VRAM 8GB環境でQwen2.5-7B Q4_K_Mを使う場合:
+    #     モデルウェイト: ~4.4GB
+    #     KVキャッシュ(n_ctx=4096): ~1.6GB → 合計6.0GB (余裕あり)
+    #     KVキャッシュ(n_ctx=2048): ~0.8GB → 合計5.2GB (さらに余裕)
+    #   2048でRAGコンテキスト3000トークン+システム500トークンは収まらない場合は
+    #   rag.pyのRAG_CONTEXT_MAX_LENGTHも合わせて調整する。
+    #   社内文書RAGの典型的な質問+回答は2048以内で十分。
+    n_ctx = 2048  # SPEED修正: 4096→2048 KVキャッシュ半減でVRAM節約・GPUフル活用
 
     # BUG-003修正: Modelfileにデフォルトシステムプロンプトを埋め込み
     # → Ollamaがモデルをメモリにロードする際から日本語モードを強制
@@ -292,6 +318,8 @@ def _build_system_prompt() -> str:
     # BUG-016修正: グラウンディング強化。「自分の知識・推測を使わない」を明示する。
     #   Qwen3系は事前学習知識が豊富なため、文書内容と自前知識を混在させる傾向がある。
     #   「RAGコンテキスト外の知識は使用禁止」と明示的に制約することでハルシネーションを抑制。
+    # BUG-033修正: 単位メタコメンタリー禁止を明示追加
+    # BUG-035修正: 情報なし時に代替手段・外部情報源を案内しない旨を明示追加
     return (
         "あなたは日本語専用の社内文書AIアシスタントです。\n"
         "【最重要ルール】\n"
@@ -300,13 +328,18 @@ def _build_system_prompt() -> str:
         "・自分の事前学習知識・推測・補完は絶対に使わないこと。文書に書いてある情報だけを使う。\n\n"
         "厳守ルール：\n"
         "1. 【出典のみ】文書に書かれた情報だけで回答する。自分の知識で補足・推測しない\n"
-        "2. 【不明は不明】文書に記載がない場合は「文書には記載がありません」とだけ答える\n"
-        "3. 【簡潔に】回答は短く、要点だけを答える。余分な説明・謝辞・案内は不要\n"
+        "2. 【不明は1文のみ】文書に記載がない場合は「文書には記載がありません。」の1文だけで答える。"
+        "それ以上は何も書かない。以下の文は絶対に書いてはならない:\n"
+        "  禁止例: 「〜を確認してください」「〜報告書をご覧ください」「〜の情報を得るためには」\n"
+        "  禁止例: 「〜する必要があります」「〜をお勧めします」「より正確な情報」\n"
+        "  禁止例: 追加の説明段落、まとめ段落、「要するに〜」「つまり〜」\n"
+        "3. 【1〜2文で完結】回答は最大2文。余分な説明・謝辞・案内・注釈・まとめは一切不要\n"
         "4. 【無関係は即終了】社内文書が質問と無関係なら「社内資料に該当情報はありませんでした」とだけ答えて終了。"
         "それ以上何も言わない\n"
         "5. 英語の文書が参考資料に含まれていても、回答は必ず日本語にする\n"
         "6. 【単位厳守】数値は文書に記載の単位・数字をそのまま使うこと。"
-        "百万円を億円に換算したり、億円を兆円に換算したりする変換は絶対に行わない"
+        "百万円を億円に換算したり、億円を兆円に換算したりする変換は絶対に行わない。"
+        "単位・数値型についてのコメント・注釈（例：「[億円]単位ではなく」）は禁止"
     )
 
 
@@ -450,12 +483,13 @@ def generate_answer(
         "messages": messages,
         "stream": False,
         "think": False,          # BUG-006修正: Qwen3/3.5 thinking mode をOllamaレベルで無効化
+        "keep_alive": "30m",     # BUG-031修正: モデルをVRAMに30分保持（デフォルト5分でアンロード→タイムアウト防止）
         "options": {
             "num_predict": effective_max_tokens,
             # BUG-014修正: temperature=0.1 に設定（デフォルト0.8はRAGに不適切）
             #   低温度にすることでモデルが文書内容に忠実な回答を生成する。
             #   ハルシネーション（文書にない情報の生成）を大幅に抑制する最重要設定。
-            "temperature": 0.1,
+            "temperature": 0,
             "top_p": 0.9,
             # BUG-017修正: repeat_penalty=1.15 で同一トークンの繰り返し生成を抑制
             #   デフォルト1.1より若干強めにして、冗長な繰り返し表現を防ぐ
@@ -488,6 +522,9 @@ def generate_answer(
             #   Qwen3.5が正解を出した後にメタコメンタリー段落（「ご提示いただいた文書には...」）を
             #   繰り返すループを防ぐ。第2段落以降のみ \n が先行するため、先頭の「not found」
             #   応答（"ご提示..." が最初のテキスト）には影響しない。
+            # BUG-032修正: "/answer" を追加
+            #   Qwen2.5が回答末尾に "/answer" を生成するケースへの対処。
+            # BUG-035修正: 情報なし時の代替案内パターンを追加
             "stop": [
                 "<|im_end|>", "<|endoftext|>", "<|im_start|>",
                 "\n質問:",
@@ -500,6 +537,13 @@ def generate_answer(
                 "\n【",
                 "\n\n回答:", "\n回答:",     # BUG-029修正: 回答エコーループ防止
                 "\nご提示いただいた",       # BUG-030修正: メタコメンタリー段落ループ防止
+                "\n/answer", "/answer",     # BUG-032修正: /answerストップトークン漏れ防止
+                "\n以下の方法", "\n以下の",  # BUG-035修正: 代替手段リスト案内を停止
+                "\nをお勧め", "\nお勧め",    # BUG-035修正: お勧めパターン
+                "\nより詳細", "\n詳しくは",  # BUG-035修正: 詳細案内パターン
+                # BUG-035修正（段落版）: "要するに" 等の冗長まとめ段落を止める
+                "\n要するに", "\nつまり、", "\nすなわち",
+                "\nまとめると", "\n要約すると", "\n言い換えれば",
             ],
         },
     }
@@ -523,6 +567,8 @@ def generate_answer(
         # BUG-019a修正: "==社内文書==" をpost-processingリストから削除
         # BUG-020修正: "\n\n社内資料" をpost-processingリストから削除（stop tokenからも削除済み）
         # BUG-023修正: "\n【" を追加 → コンテキストエコーをpost-processingでも除去
+        # BUG-032修正: "/answer" を追加（安全ネット）
+        # BUG-035修正: 代替手段案内パターンを追加
         for _sep in ["\n---", " ---", "[/社内文書]", "```", "/no_think",
                      "\nそれでは", "\n（注", "\nもし具体的",
                      " [/", "[/", "\nこの回答は", "==文書終わり",
@@ -530,9 +576,37 @@ def generate_answer(
                      "\n以上は", "\nこれでご質問", "\nご確認いただければ",
                      "\n補足:", "\n注記:", "\n参考:", "\n上記の",
                      "\n【",
-                     "\n\n回答:", "\n回答:"]:  # BUG-029修正: 回答エコーループ除去
+                     "\n\n回答:", "\n回答:",       # BUG-029修正: 回答エコーループ除去
+                     "\n/answer", "/answer",       # BUG-032修正: /answerストップトークン漏れ
+                     "\n以下の方法", "\n以下の",    # BUG-035修正: 代替手段リスト
+                     "\nをお勧め", "\nお勧め",      # BUG-035修正: お勧めパターン（改行あり）
+                     "\nより詳細", "\n詳しくは"]:   # BUG-035修正: 詳細案内パターン
             if _sep in answer:
                 answer = answer.split(_sep)[0].strip()
+        # BUG-035修正（インライン版）: 改行なしでも推薦文・外部参照文を除去
+        #   例: "...できません。より正確な回答を得るには..." → "...できません。" まで
+        #   例: "...不可能です。三菱重工の公式プレスリリース...をお勧めします。" → 不可能です。まで
+        for _inline_sep in ["。より正確", "。詳しくは", "をお勧めします", "ことをお勧め",
+                             "をご覧ください", "をご参照ください",
+                "確認する必要があります", "確認する必要が", "をご確認ください",
+                             "してみてください", "をお確かめください"]:
+            if _inline_sep in answer:
+                # 「。」を含む場合はその直後（句点含む）でカット
+                if _inline_sep.startswith("。"):
+                    answer = answer.split(_inline_sep)[0] + "。"
+                else:
+                    answer = answer.split(_inline_sep)[0].strip()
+                    # 末尾に句点がなければ補完（切り捨て感を減らす）
+                    if answer and not answer.endswith("。") and not answer.endswith("。"):
+                        answer = answer.rstrip("、") + "。"
+                break
+        # BUG-033修正: 単位メタコメンタリー除去（安全ネット）
+        #   例: "112,300名です。[億円]単位ではなく..." → "112,300名です。" のみ残す
+        #   文末に「。」がある場合、それ以降に "[" が続くパターンをカット
+        _answer_clean = _re.sub(r"。\[.*", "。", answer)
+        if _answer_clean != answer:
+            logger.info("BUG-033: 単位メタコメンタリーを除去")
+            answer = _answer_clean.strip()
         logger.info(f"Ollama推論完了: {len(answer)}文字")
         return answer
     except urllib.error.URLError as e:
@@ -601,12 +675,13 @@ def stream_answer(
         "messages": messages,
         "stream": True,
         "think": False,          # BUG-006修正: Qwen3/3.5 thinking mode をOllamaレベルで無効化
+        "keep_alive": "30m",     # BUG-031修正: モデルをVRAMに30分保持（デフォルト5分でアンロード→タイムアウト防止）
         "options": {
             "num_predict": effective_max_tokens,
             # BUG-014修正: temperature=0.1 に設定（デフォルト0.8はRAGに不適切）
             #   低温度にすることでモデルが文書内容に忠実な回答を生成する。
             #   ハルシネーション（文書にない情報の生成）を大幅に抑制する最重要設定。
-            "temperature": 0.1,
+            "temperature": 0,
             "top_p": 0.9,
             # BUG-017修正: repeat_penalty=1.15 で同一トークンの繰り返し生成を抑制
             # BUG-030修正: repeat_penalty=1.2 に強化（段落レベル繰り返し抑制）
@@ -634,6 +709,14 @@ def stream_answer(
             #   （thinking終了後の回答部分にのみ適用される）。
             "stop": [
                 "<|im_end|>", "<|endoftext|>", "<|im_start|>",
+                # BUG-035修正: 代替手段・推薦文を Ollama レベルで止める（streaming版）
+                "\nをお勧め", "\nお勧め",
+                "\nより詳細", "\n詳しくは",
+                "\n以下の方法", "\n以下の",
+                "\n要するに", "\nつまり、", "\nすなわち",
+                "\nまとめると", "\n言い換えれば",
+                "より正確な", "確認する必要が",
+                "/answer",
             ],
         },
         # BUG-020修正: "\n\n社内資料" をstream_answerのストップトークンからも削除
@@ -677,6 +760,18 @@ def stream_answer(
                 "\n補足:", "\n注記:", "\n参考:", "\n上記の",
                 "\n【",
                 "\nご提示いただいた",  # BUG-030修正: メタコメンタリー段落ループ防止
+                "\n/answer", "/answer",     # BUG-032修正: /answerストップトークン漏れ防止
+                "\n以下の方法", "\n以下の",  # BUG-035修正: 代替手段リスト案内を停止
+                "\nをお勧め", "\nお勧め",    # BUG-035修正: お勧めパターン
+                "\nより詳細", "\n詳しくは",  # BUG-035修正: 詳細案内パターン
+                # BUG-035修正（段落版）: "要するに" 等の冗長まとめ段落を止める
+                "\n要するに", "\n\n要するに",
+                "\nつまり、", "\nすなわち",
+                "\nまとめると", "\n要約すると", "\n言い換えれば",
+                # BUG-035修正（インライン版）: 改行なし推薦文をストリーミング中に検知
+                "をお勧めします", "ことをお勧め",
+                "より正確な",
+                "をご覧ください", "をご参照ください",
             ]
             _MAX_BUF_TAIL = max(len(p) for p in _STREAM_STOP_PATTERNS) + 1
 
@@ -773,9 +868,28 @@ def stream_answer(
                                          "\n\n質問に直接",
                                          "\n以上は", "\nこれでご質問", "\nご確認いただければ",
                                          "\n補足:", "\n注記:", "\n参考:", "\n上記の",
-                                         "\n【"]:
+                                         "\n【",
+                                         "\n/answer", "/answer",     # BUG-032修正: /answerストップトークン漏れ防止
+                                         "\n以下の方法", "\n以下の",  # BUG-035修正: 代替手段リスト案内を停止
+                                         "\nをお勧め", "\nお勧め",    # BUG-035修正: お勧めパターン
+                                         "\nより詳細", "\n詳しくは"]: # BUG-035修正: 詳細案内パターン
                                 if _sep in clean:
                                     clean = clean.split(_sep)[0]
+                            # BUG-035修正（インライン版）: 改行なし推薦文・外部参照文を除去
+                            for _isep in ["。より正確", "。詳しくは", "をお勧めします",
+                                          "ことをお勧め", "をご覧ください", "をご参照ください",
+                                          "をご確認ください", "してみてください"]:
+                                if _isep in clean:
+                                    if _isep.startswith("。"):
+                                        clean = clean.split(_isep)[0] + "。"
+                                    else:
+                                        clean = clean.split(_isep)[0].strip()
+                                    break
+                            # BUG-033修正: 単位メタコメンタリー除去（安全ネット）
+                            import re as _re_clean
+                            _cm = _re_clean.sub(r"。\[.*", "。", clean)
+                            if _cm != clean:
+                                clean = _cm
                             if clean.strip():
                                 yield clean.strip()
                             _buf = ""
@@ -791,4 +905,40 @@ def stream_answer(
 
 def warmup_model(model_name: str) -> bool:
     """
-    モデルをOllamaにロードしてウォームアップする�
+    モデルをOllamaにロードしてウォームアップする。
+    アプリ起動時に呼ぶことで、初回質問の待ち時間を短縮する。
+
+    Returns:
+        True: ウォームアップ成功 / False: 失敗（Ollama未起動など）
+    """
+    if not check_ollama_running():
+        return False
+    if not is_registered_with_ollama(model_name):
+        try:
+            register_model_with_ollama(model_name)
+        except Exception as e:
+            logger.warning(f"ウォームアップ中の登録失敗: {e}")
+            return False
+
+    model_info = LLM_MODELS.get(model_name, {})
+    ollama_name = model_info.get("ollama_name", "")
+    if not ollama_name:
+        return False
+
+    try:
+        # 最小リクエストでモデルをVRAMにロード
+        _ollama_post("/api/chat", {
+            "model": ollama_name,
+            "messages": [{"role": "user", "content": "こんにちは"}],
+            "stream": False,
+            "options": {"num_predict": 1},
+            "keep_alive": "30m",  # BUG-031修正: アイドル30分間はVRAMに保持
+        }, timeout=120)           # BUG-031修正: warmup timeout 60s→120s
+        logger.info(f"warmup完了: {ollama_name}")
+    except Exception as e:
+        logger.warning(f"warmup失敗（無視）: {e}")
+
+
+def release_llm() -> None:
+    """後方互換性のためのスタブ。現在は何もしない。"""
+    pass

@@ -40,17 +40,50 @@ def _init_session_state() -> None:
         # 設定を読み込む
         config = load_config()
 
-        # カスタムモデルを読み込む
+        # カスタムモデルを読み込む（llm.pyのCUSTOM_MODELS_FILEから）
         load_custom_models()
 
         st.session_state.config = config
         st.session_state.page = "chat"
         st.session_state.chat_messages = []
-        st.session_state.indexing = False
         st.session_state.initialized = True
 
 
 _init_session_state()
+
+
+# ─── モデルプリウォーム（初回ロードを起動時に前倒し）─────────────
+def _warmup_model_if_needed() -> None:
+    """
+    選択済みモデルをバックグラウンドでOllamaにロードする。
+    モデルがVRAMにロードされていない場合のみ実行する。
+    SPEED修正: warmup_done フラグではなく /api/ps で実際のロード状態を確認し、
+    アンロード後のコールドスタートを防ぐ。
+    """
+    selected_model = st.session_state.config.get("selected_model", "")
+    if not selected_model:
+        return
+
+    import threading
+    from core.llm import warmup_model, is_model_downloaded, is_model_loaded_in_ollama
+
+    if not is_model_downloaded(selected_model):
+        return
+
+    # すでにVRAMにロード済みなら何もしない
+    if is_model_loaded_in_ollama(selected_model):
+        return
+
+    def _run():
+        try:
+            warmup_model(selected_model)
+        except Exception:
+            pass  # プリウォームの失敗はサイレントに無視
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+_warmup_model_if_needed()
 
 # ─── サイドバー ───────────────────────────────────────────────
 with st.sidebar:
@@ -125,3 +158,4 @@ else:
     st.error(f"不明なページ: {page}")
     st.session_state.page = "chat"
     st.rerun()
+# reload-trigger-4
