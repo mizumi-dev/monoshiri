@@ -315,7 +315,7 @@ def _build_messages_with_history(
     question: str,
     context: str,
     chat_history: list[dict] | None = None,
-    max_history_turns: int = 3,
+    max_history_turns: int = 2,
 ) -> list[dict]:
     """
     システムプロンプト・会話履歴・現在の質問からメッセージリストを構築する。
@@ -327,8 +327,9 @@ def _build_messages_with_history(
         context: RAG検索で取得したコンテキスト
         chat_history: [{"role": "user"|"assistant", "content": str}] 形式の履歴
         max_history_turns: 過去何ターン分を含めるか（トークン溢れ防止）
-            デフォルト3: 3往復=6メッセージ≒1800トークン
-            コンテキスト3000 + システム500 + 回答1024 = 合計6324 / 8192トークン(77%)
+            BUG-029修正: 3→2に削減（前の質問の回答内容が次の回答に汚染するのを軽減）
+            デフォルト2: 2往復=4メッセージ≒1200トークン
+            コンテキスト3000 + システム500 + 回答1024 = 合計5724 / 4096トークン考慮
     """
     messages = [{"role": "system", "content": system_prompt}]
 
@@ -458,7 +459,7 @@ def generate_answer(
             "top_p": 0.9,
             # BUG-017修正: repeat_penalty=1.15 で同一トークンの繰り返し生成を抑制
             #   デフォルト1.1より若干強めにして、冗長な繰り返し表現を防ぐ
-            "repeat_penalty": 1.15,
+            "repeat_penalty": 1.2,   # BUG-030修正: 1.15→1.2 段落繰り返し抑制強化
             # BUG-007修正: 特殊トークンでアシスタント応答の暴走を防ぐ
             # BUG-008修正: "\n質問:" を追加 → Q&A形式の連続生成を強制停止
             # BUG-009修正: "/no_think" を追加 → Qwen2.5がプロンプト断片を出力した時点で停止
@@ -483,6 +484,10 @@ def generate_answer(
             #   "【" alone が引用形式の回答（「【出典】...」等）を空にしてしまう問題を修正。
             #   改行後のエコーのみ停止すれば十分なため "\n【" のみ残す。
             # BUG-027修正: "/no_think" をストップトークンから削除（stream_answerと同様）
+            # BUG-030修正: "\nご提示いただいた" を追加
+            #   Qwen3.5が正解を出した後にメタコメンタリー段落（「ご提示いただいた文書には...」）を
+            #   繰り返すループを防ぐ。第2段落以降のみ \n が先行するため、先頭の「not found」
+            #   応答（"ご提示..." が最初のテキスト）には影響しない。
             "stop": [
                 "<|im_end|>", "<|endoftext|>", "<|im_start|>",
                 "\n質問:",
@@ -493,6 +498,8 @@ def generate_answer(
                 "\n以上は", "\nこれでご質問", "\nご確認いただければ",
                 "\n補足:", "\n注記:", "\n参考:", "\n上記の",
                 "\n【",
+                "\n\n回答:", "\n回答:",     # BUG-029修正: 回答エコーループ防止
+                "\nご提示いただいた",       # BUG-030修正: メタコメンタリー段落ループ防止
             ],
         },
     }
@@ -507,6 +514,8 @@ def generate_answer(
         # BUG-006修正: <think>...</think> ブロックを除去（安全ネット）
         import re as _re
         answer = _re.sub(r"<think>.*?</think>", "", answer, flags=_re.DOTALL).strip()
+        # BUG-029修正: 先頭の「回答:」「回答：」プレフィックスを除去
+        answer = _re.sub(r"^回答[:：]\s*", "", answer).strip()
         # BUG-008修正: "\n質問:" 以降のQ&A連続生成を後処理でも除去（安全ネット）
         if "\n質問:" in answer:
             answer = answer.split("\n質問:")[0].strip()
@@ -520,7 +529,8 @@ def generate_answer(
                      "\n\n質問に直接",
                      "\n以上は", "\nこれでご質問", "\nご確認いただければ",
                      "\n補足:", "\n注記:", "\n参考:", "\n上記の",
-                     "\n【"]:
+                     "\n【",
+                     "\n\n回答:", "\n回答:"]:  # BUG-029修正: 回答エコーループ除去
             if _sep in answer:
                 answer = answer.split(_sep)[0].strip()
         logger.info(f"Ollama推論完了: {len(answer)}文字")
@@ -599,7 +609,8 @@ def stream_answer(
             "temperature": 0.1,
             "top_p": 0.9,
             # BUG-017修正: repeat_penalty=1.15 で同一トークンの繰り返し生成を抑制
-            "repeat_penalty": 1.15,
+            # BUG-030修正: repeat_penalty=1.2 に強化（段落レベル繰り返し抑制）
+            "repeat_penalty": 1.2,
             # BUG-007修正: ストップトークンを明示してアシスタント応答の後に
             # <endoftext> や次のユーザーターンを生成し続けるのを防ぐ
             # BUG-008修正: "\n質問:" を追加 → Q&A形式の連続生成を強制停止
@@ -665,6 +676,7 @@ def stream_answer(
                 "\n以上は", "\nこれでご質問", "\nご確認いただければ",
                 "\n補足:", "\n注記:", "\n参考:", "\n上記の",
                 "\n【",
+                "\nご提示いただいた",  # BUG-030修正: メタコメンタリー段落ループ防止
             ]
             _MAX_BUF_TAIL = max(len(p) for p in _STREAM_STOP_PATTERNS) + 1
 
@@ -779,40 +791,4 @@ def stream_answer(
 
 def warmup_model(model_name: str) -> bool:
     """
-    モデルをOllamaにロードしてウォームアップする。
-    アプリ起動時に呼ぶことで、初回質問の待ち時間を短縮する。
-
-    Returns:
-        True: ウォームアップ成功 / False: 失敗（Ollama未起動など）
-    """
-    if not check_ollama_running():
-        return False
-    if not is_registered_with_ollama(model_name):
-        try:
-            register_model_with_ollama(model_name)
-        except Exception as e:
-            logger.warning(f"ウォームアップ中の登録失敗: {e}")
-            return False
-
-    model_info = LLM_MODELS.get(model_name, {})
-    ollama_name = model_info.get("ollama_name", "")
-    if not ollama_name:
-        return False
-
-    try:
-        # 最小リクエストでモデルをVRAMにロード
-        _ollama_post("/api/chat", {
-            "model": ollama_name,
-            "messages": [{"role": "user", "content": "こんにちは"}],
-            "stream": False,
-            "options": {"num_predict": 1},
-        }, timeout=60)
-        logger.info(f"ウォームアップ完了: {ollama_name}")
-        return True
-    except Exception as e:
-        logger.warning(f"ウォームアップ失敗: {e}")
-        return False
-
-
-def release_llm() -> None:
-    """後方互換性のために残す（Ollamaバックエンドではメモリ解放
+    モデルをOllamaにロードしてウォームアップする�
