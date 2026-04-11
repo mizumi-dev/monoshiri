@@ -4,9 +4,11 @@
 
 「社内資料は、一切外に出ません。」
 - 完全ローカルモード（Phase 1 MVP）
-- Streamlit + ChromaDB + multilingual-e5-large + llama-cpp-python
+- Streamlit + ChromaDB + multilingual-e5-large + Ollama
 """
 from __future__ import annotations
+import logging
+import logging.handlers
 import sys
 from pathlib import Path
 
@@ -16,6 +18,28 @@ import streamlit as st
 _app_dir = Path(__file__).parent
 if str(_app_dir) not in sys.path:
     sys.path.insert(0, str(_app_dir))
+
+# ─── ログローテーション設定（v3.4仕様: 10MB・3世代）─────────────
+def _setup_logging() -> None:
+    from core.config import LOGS_DIR
+    log_file = LOGS_DIR / "monoshiri.log"
+    handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=3,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    # 重複ハンドラ追加を防ぐ
+    if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in root_logger.handlers):
+        root_logger.addHandler(handler)
+
+_setup_logging()
 
 # ─── ページ設定（最初に呼ぶ必要がある）─────────────────────────
 st.set_page_config(
@@ -50,6 +74,18 @@ def _init_session_state() -> None:
 
 
 _init_session_state()
+
+# ─── RAM 8GB 未満の警告（v3.4仕様: 動作は試みるが警告を表示）────
+if "ram_warned" not in st.session_state:
+    import psutil
+    _total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+    if _total_ram_gb < 8.0:
+        st.warning(
+            f"⚠️ このPCのRAMは **{_total_ram_gb:.1f} GB** です。"
+            "モノシリは **8GB以上** を推奨しています。動作は試みますが、"
+            "メモリ不足によりアプリが停止する可能性があります。"
+        )
+    st.session_state.ram_warned = True
 
 
 # ─── モデルプリウォーム（初回ロードを起動時に前倒し）─────────────

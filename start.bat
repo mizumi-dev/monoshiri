@@ -20,6 +20,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+:: --- Resolve real Python path (WindowsApps stub workaround) ---
+for /f "delims=" %%i in ('python -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%i"
+echo [OK] Python: %PYTHON_EXE%
+
 :: --- Package check ---
 python -c "import streamlit" >nul 2>&1
 if %errorlevel% neq 0 (
@@ -34,7 +38,7 @@ if %errorlevel% neq 0 (
 
 :: --- Already running check ---
 echo [CHECK] Checking if Monoshiri is already running...
-powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 8501 -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
+powershell -NoProfile -Command "$conn = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue; if ($conn) { exit 0 } else { exit 1 }" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Monoshiri is already running.
     echo      Access: http://localhost:8501
@@ -67,16 +71,7 @@ if not exist "%~dp0logs" mkdir "%~dp0logs"
 
 :: Launch Streamlit as a completely detached background process via PowerShell
 :: -NoNewWindow + -RedirectStandardOutput ensures the process survives terminal close
-powershell -NoProfile -Command ^
-  "$p = Start-Process ^
-    -FilePath python ^
-    -ArgumentList '-m','streamlit','run','app.py','--server.port','8501','--server.headless','true','--browser.gatherUsageStats','false' ^
-    -WorkingDirectory '%~dp0' ^
-    -NoNewWindow ^
-    -RedirectStandardOutput '%~dp0logs\streamlit.log' ^
-    -RedirectStandardError '%~dp0logs\streamlit_err.log' ^
-    -PassThru; ^
-   $p.Id | Out-File -FilePath '%~dp0logs\streamlit.pid' -Encoding ascii"
+powershell -NoProfile -Command "$p = Start-Process -FilePath \"%PYTHON_EXE%\" -ArgumentList '-m','streamlit','run','app.py','--server.port','8501','--server.headless','true','--browser.gatherUsageStats','false' -WorkingDirectory '%~dp0' -NoNewWindow -RedirectStandardOutput '%~dp0logs\streamlit.log' -RedirectStandardError '%~dp0logs\streamlit_err.log' -PassThru; $p.Id | Out-File -FilePath '%~dp0logs\streamlit.pid' -Encoding ascii"
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to start Monoshiri.

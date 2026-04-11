@@ -6,8 +6,127 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# プロセス並列用のトップレベル関数（ProcessPoolExecutorで使用）
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _extract_pdf_page_worker(args: tuple[str, int, dict]) -> dict[str, Any] | None:
+    """
+    PDFの単一ページを抽出するワーカー関数（ProcessPoolExecutor用）
+
+    Args:
+        args: (file_path_str, page_num, extract_params)
+
+    Returns:
+        {"text": str, "page": int} or None if failed
+    """
+    file_path_str, page_num, params = args
+
+    try:
+        import pdfplumber as _pdfplumber
+
+        with _pdfplumber.open(file_path_str) as pdf:
+            if page_num >= len(pdf.pages):
+                return None
+
+            page = pdf.pages[page_num]
+            x_tolerance = params.get("x_tolerance", 3)
+            y_tolerance = params.get("y_tolerance", 3)
+
+            text = page.extract_text(x_tolerance=x_tolerance, y_tolerance=y_tolerance)
+
+            if text and text.strip():
+                return {
+                    "text": text.strip(),
+                    "page": page_num + 1,
+                }
+            return None
+
+    except Exception as e:
+        # エラーは無視してNoneを返す（フォールバックで処理）
+        return None
+
+
+def _extract_pdf_parallel(file_path: Path, max_workers: int = 4) -> tuple[list[dict], str | None]:
+    """
+    PDFをページ単位で並列抽出（高速化版）
+
+    Args:
+        file_path: PDFファイルパス
+        max_workers: 並列ワーカー数（デフォルト4）
+
+    Returns:
+        (page_chunks, skip_reason)
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    try:
+        import pdfplumber as _pdfplumber
+
+        # まずページ数を確認
+        with _pdfplumber.open(str(file_path)) as pdf:
+            total_pages = len(pdf.pages)
+
+        if total_pages == 0:
+            return [], "PDFにページがありません"
+
+        # 単一ページの場合は並列化しない
+        if total_pages == 1:
+            return _extract_pdf_single_thread(file_path)
+
+        # 並列処理用のパラメータ
+        params = {"x_tolerance": 3, "y_tolerance": 3}
+        args_list = [(str(file_path), i, params) for i in range(total_pages)]
+
+        page_chunks = []
+
+        # ProcessPoolExecutorでページを並列抽出
+        with ProcessPoolExecutor(max_workers=min(max_workers, total_pages)) as executor:
+            futures = {executor.submit(_extract_pdf_page_worker, args): args[1] for args in args_list}
+
+            for future in as_completed(futures):
+                page_num = futures[future]
+                try:
+                    result = future.result(timeout=30)  # 30秒タイムアウト
+                    if result:
+                        page_chunks.append({
+                            "text": result["text"],
+                            "page": result["page"],
+                            "slide": None,
+                        })
+                except Exception as e:
+                    logger.debug(f"ページ {page_num + 1} の並列抽出失敗: {e}")
+
+        # ページ順にソート
+        page_chunks.sort(key=lambda x: x["page"])
+
+        if page_chunks:
+            return page_chunks, None
+
+        # 並列抽出が失敗した場合はフォールバック
+        logger.warning(f"並列抽出失敗、シングルスレッドにフォールバック: {file_path.name}")
+        return _extract_pdf_single_thread(file_path)
+
+    except ImportError:
+        logger.warning(f"pdfplumberが未インストールです。PyMuPDFにフォールバックします。")
+        return _extract_pdf_pymupdf(file_path)
+    except Exception as e:
+        logger.warning(f"並列PDF抽出エラー、フォールバック: {file_path.name}: {e}")
+        return _extract_pdf_single_thread(file_path)
+
+
+def _extract_pdf_single_thread(file_path: Path) -> tuple[list[dict], str | None]:
+    """PDFをシングルスレッドで抽出（フォールバック用）"""
+    return _extract_pdf_original(file_path)
+
+
+def _extract_pdf_original(file_path: Path) -> tuple[list[dict], str | None]:
+    """元のpdfplumber抽出ロジック"""
 
 # 対応ファイル拡張子
 SUPPORTED_EXTENSIONS: set[str] = {
@@ -91,7 +210,7 @@ def extract_text(file_path: Path) -> tuple[list[dict], str | None]:
     return [], "未対応形式"
 
 
-def _extract_pdf(file_path: Path) -> tuple[list[dict], str | None]:
+def _extract_pdf(file_path: Path, use_parallel: bool = True) -> tuple[list[dict], str | None]:
     """pdfplumberを使いページごとにテキスト抽出（テーブル構造保持）
 
     IMPROVE-001: PyMuPDF get_text("blocks")+座標ソート方式 → pdfplumber extract_text() 方式に変更。
@@ -99,12 +218,32 @@ def _extract_pdf(file_path: Path) -> tuple[list[dict], str | None]:
     テキストを再構成するため、財務諸表のテーブル（年度別売上高、役員一覧等）を
     LLMが理解しやすい形式で抽出できる。
 
+    高速化: ProcessPoolExecutorでPDFページを並列処理（GIL回避）
+
     例（Apple損益計算書）:
       PyMuPDF → 列方向に分断されたブロックの羅列
       pdfplumber → "Total net sales 416,161 391,035 383,285"（列ヘッダーと値が同一行）
 
     フォールバック: pdfplumberが失敗した場合はPyMuPDFで再試行。
     """
+    # ── 並列処理版（高速） ─────────────────────────────────────────
+    if use_parallel:
+        try:
+            # ProcessPoolExecutorでページを並列抽出
+            result = _extract_pdf_parallel(file_path, max_workers=4)
+            if result[0]:  # ページチャンクが取得できた
+                logger.debug(f"並列PDF抽出成功: {file_path.name} ({len(result[0])}ページ)")
+                return result
+            # 空の場合はフォールバック
+        except Exception as e:
+            logger.debug(f"並列PDF抽出失敗、シングルスレッドにフォールバック: {e}")
+
+    # ── シングルスレッド版（フォールバック） ─────────────────────────
+    return _extract_pdf_original(file_path)
+
+
+def _extract_pdf_original(file_path: Path) -> tuple[list[dict], str | None]:
+    """元のpdfplumber抽出ロジック（シングルスレッド）"""
     page_chunks = []
 
     # ── pdfplumber（メイン） ──────────────────────────────────────

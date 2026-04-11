@@ -70,6 +70,26 @@ def check_network_connectivity() -> tuple[bool, str]:
     )
 
 
+def verify_gguf_file(file_path: Path) -> bool:
+    """
+    GGUFファイルのマジックナンバーを検証する（v3.4仕様: セキュリティ要件）。
+    GGUFフォーマットの先頭4バイトは b'GGUF' でなければならない。
+
+    Returns:
+        True: 有効なGGUFファイル / False: 破損・偽装ファイル
+    """
+    try:
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"GGUF":
+            logger.error(f"GGUFマジックナンバー不一致: {file_path} (got {magic!r})")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"GGUFファイル検証エラー: {e}")
+        return False
+
+
 def download_with_urllib(url: str, dest_path: Path, progress_callback=None) -> bool:
     """
     urllib を使ってファイルを直接ダウンロードする（huggingface_hub不要のフォールバック）。
@@ -160,6 +180,9 @@ def download_model(model_name: str, progress_callback=None) -> tuple[bool, str]:
             effective_url = effective_url.replace("https://huggingface.co", HF_MIRROR_URL)
         logger.info(f"urllib で直接ダウンロード開始: {effective_url}")
         if download_with_urllib(effective_url, dest_path, progress_callback):
+            if dest_path.suffix == ".gguf" and not verify_gguf_file(dest_path):
+                dest_path.unlink(missing_ok=True)
+                return False, "ダウンロードしたファイルはGGUF形式ではありません（破損または偽装の可能性）"
             return True, "ダウンロード完了"
         errors.append(f"直接ダウンロード失敗: {effective_url}")
         logger.warning("直接ダウンロード失敗。huggingface_hub にフォールバック...")
@@ -185,6 +208,9 @@ def download_model(model_name: str, progress_callback=None) -> tuple[bool, str]:
                 if HF_MIRROR_URL:
                     kwargs["endpoint"] = HF_MIRROR_URL
                 hf_hub_download(**kwargs)
+                if dest_path.suffix == ".gguf" and not verify_gguf_file(dest_path):
+                    dest_path.unlink(missing_ok=True)
+                    return False, "ダウンロードしたファイルはGGUF形式ではありません（破損または偽装の可能性）"
                 return True, "ダウンロード完了"
 
             except Exception as e:

@@ -140,7 +140,7 @@ def _render_chat_tab(config: dict) -> None:
             max_value=1.0,
             value=float(similarity),
             step=0.05,
-            help="値を下げると広く検索。上げると絞り込み検索になります（デフォルト: 0.5）",
+            help="値を下げると広く検索。上げると絞り込み検索になります（デフォルト: 0.4）",
         )
         if abs(new_sim - similarity) > 0.001:
             config["similarity_threshold"] = new_sim
@@ -262,53 +262,65 @@ def _render_chat_tab(config: dict) -> None:
             evidence_list = []
 
             # ─── ストリーミング表示エリア ───────────────────────────
+            # v3.4仕様: LLM回答生成失敗時に自動再試行（最大3回）
+            _MAX_RETRIES = 3
             with st.chat_message("assistant"):
-                try:
-                    from core.rag import stream_question
-                    answer_parts = []
+                for _attempt in range(1, _MAX_RETRIES + 1):
+                    try:
+                        from core.rag import stream_question
+                        answer_parts = []
+                        error_msg = None
 
-                    # エビデンスと回答のプレースホルダを用意
-                    evidence_placeholder = st.empty()
-                    answer_placeholder = st.empty()
+                        # エビデンスと回答のプレースホルダを用意
+                        evidence_placeholder = st.empty()
+                        answer_placeholder = st.empty()
 
-                    with st.spinner("🔍 文書を検索中..."):
-                        stream = stream_question(
-                            question=prompt,
-                            model_name=selected_model,
-                            similarity_threshold=new_sim,
-                            top_k=TOP_K,
-                            chat_history=history_for_llm,  # BUG-001修正
-                        )
-                        # 最初のイベントはエビデンス
-                        first = next(stream, None)
-                        if first and first["type"] == "evidence":
-                            evidence_list = first["data"]
+                        with st.spinner("🔍 文書を検索中..." if _attempt == 1 else f"🔄 再試行中... ({_attempt}/{_MAX_RETRIES})"):
+                            stream = stream_question(
+                                question=prompt,
+                                model_name=selected_model,
+                                similarity_threshold=new_sim,
+                                top_k=TOP_K,
+                                chat_history=history_for_llm,  # BUG-001修正
+                            )
+                            # 最初のイベントはエビデンス
+                            first = next(stream, None)
+                            if first and first["type"] == "evidence":
+                                evidence_list = first["data"]
 
-                    # エビデンスを即座に表示
-                    with evidence_placeholder.container():
-                        render_evidence(evidence_list, key_prefix="cur")
+                        # エビデンスを即座に表示
+                        with evidence_placeholder.container():
+                            render_evidence(evidence_list, key_prefix="cur")
 
-                    # トークンをストリーミング表示しながらバッファに蓄積
-                    for event in stream:
-                        if event["type"] == "token":
-                            answer_parts.append(event["data"])
-                            answer_placeholder.markdown("".join(answer_parts))
-                        elif event["type"] == "error":
-                            error_msg = event["data"]
-                            break
+                        # トークンをストリーミング表示しながらバッファに蓄積
+                        for event in stream:
+                            if event["type"] == "token":
+                                answer_parts.append(event["data"])
+                                answer_placeholder.markdown("".join(answer_parts))
+                            elif event["type"] == "error":
+                                error_msg = event["data"]
+                                break
 
-                    full_answer = "".join(answer_parts)
-                    if error_msg:
-                        answer_placeholder.error(
-                            f"エラーが発生しました:\n\n```\n{error_msg[:400]}\n```"
-                        )
+                        full_answer = "".join(answer_parts)
+                        if error_msg:
+                            if _attempt < _MAX_RETRIES:
+                                logger.warning(f"LLM回答生成エラー（試行{_attempt}/{_MAX_RETRIES}）: {error_msg[:200]}")
+                                import time; time.sleep(1)
+                                continue  # リトライ
+                            answer_placeholder.error(
+                                f"エラーが発生しました:\n\n```\n{error_msg[:400]}\n```"
+                            )
+                        break  # 成功またはエラー表示済み → ループ終了
 
-                except Exception as e:
-                    import traceback as _tb
-                    tb_str = _tb.format_exc()
-                    logger.error(f"チャットエラー（詳細）:\n{tb_str}")
-                    error_msg = str(e)[:400]
-                    st.error(f"エラーが発生しました: {error_msg}")
+                    except Exception as e:
+                        import traceback as _tb
+                        tb_str = _tb.format_exc()
+                        logger.error(f"チャットエラー（試行{_attempt}/{_MAX_RETRIES}）:\n{tb_str}")
+                        if _attempt < _MAX_RETRIES:
+                            import time; time.sleep(1)
+                            continue  # リトライ
+                        error_msg = str(e)[:400]
+                        st.error(f"エラーが発生しました: {error_msg}")
 
             # BUG-002修正: セッション状態に保存してから st.rerun() で再描画
             # → 履歴ループからの一貫したレンダリングに切り替え、消える問題を解消

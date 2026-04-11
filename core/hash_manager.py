@@ -40,8 +40,26 @@ def compute_hash(file_path: Path) -> str | None:
         return None
 
 
-def make_folder_id(folder_path: Path) -> str:
+def compute_lightweight_hash(file_path: Path) -> str | None:
+    """
+    ファイルの軽量ハッシュを計算する（サイズ+mtimeのみ）。
+    force=True時など、高速性が優先される場面で使用。
+    完全性は低いが、I/O負荷が少ない。
+    """
+    try:
+        stat = file_path.stat()
+        # サイズとmtimeを組み合わせたハッシュ
+        content = f"{stat.st_size}:{stat.st_mtime:.0f}"
+        return hashlib.sha256(content.encode()).hexdigest()
+    except (OSError, PermissionError) as e:
+        logger.warning(f"軽量ハッシュ計算失敗 {file_path.name}: {e}")
+        return None
+
+
+def make_folder_id(folder_path: Path | str) -> str:
     """フォルダパスから一意のIDを生成する（SHA-256ハッシュ）"""
+    if isinstance(folder_path, str):
+        folder_path = Path(folder_path)
     return hashlib.sha256(str(folder_path.resolve()).encode()).hexdigest()[:16]
 
 
@@ -136,6 +154,7 @@ def clear_all_hashes() -> None:
 def get_diff(
     folder_id: str,
     current_files: list[Path],
+    use_full_hash: bool = False,
 ) -> tuple[list[Path], list[Path], list[str]]:
     """
     前回のインデックスとの差分を検出する。
@@ -143,6 +162,8 @@ def get_diff(
     Args:
         folder_id: フォルダID
         current_files: 現在のファイル一覧
+        use_full_hash: Trueの場合、SHA-256フルハッシュを使用（遅いが正確）
+                        Falseの場合、軽量ハッシュ（サイズ+mtime）を使用（高速）
 
     Returns:
         (new_or_modified, unchanged, deleted_paths)
@@ -156,9 +177,13 @@ def get_diff(
     new_or_modified: list[Path] = []
     unchanged: list[Path] = []
 
+    # ハッシュ関数を選択（デフォルトは高速な軽量ハッシュ）
+    hash_func = compute_hash if use_full_hash else compute_lightweight_hash
+    hash_type = "フル" if use_full_hash else "軽量"
+
     for file_path in current_files:
         path_str = str(file_path)
-        current_hash = compute_hash(file_path)
+        current_hash = hash_func(file_path)
         if current_hash is None:
             # 読み取れないファイルはスキップ（変更なし扱い）
             continue
@@ -170,5 +195,7 @@ def get_diff(
 
     # 削除されたファイル = 前回ハッシュに存在するが今回のスキャンにない
     deleted_paths = [p for p in saved_hashes if p not in current_path_strs]
+
+    logger.info(f"差分検出完了[{hash_type}]: 新規・変更={len(new_or_modified)}, 変更なし={len(unchanged)}, 削除={len(deleted_paths)}")
 
     return new_or_modified, unchanged, deleted_paths

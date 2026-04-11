@@ -2,6 +2,10 @@
 モノシリ RAGパイプライン
 ベクトルDB検索 → コンテキスト構築 → ローカルLLM回答生成
 透明性原則に基づき全回答にエビデンスを付与する。
+
+TODO(仕様書更新): v3.4仕様書は「該当なし時のフォールバック回答」を記載しているが、
+  ADR-002に基づきフォールバック廃止済み。関連文書なしの場合は正直に
+  「見つかりません」と返す設計。仕様書のエラーハンドリングセクションを更新すること。
 """
 from __future__ import annotations
 import logging
@@ -9,7 +13,6 @@ import logging
 from core.config import TOP_K, MAX_EVIDENCE, RAG_CONTEXT_MAX_LENGTH
 from core.chromadb_store import get_collection
 from core.embedder import embed_query
-from core.indexer import get_collection
 from core.llm import generate_answer, stream_answer
 
 logger = logging.getLogger(__name__)

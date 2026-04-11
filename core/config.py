@@ -31,8 +31,15 @@ HASH_DIR          = CACHE_DIR / "hashes"          # フォルダ別ハッシュ�
 USAGE_FILE        = DATA_DIR / "usage.json"      # Free層使用量トラッキング
 
 # 初回起動時にディレクトリを作成
+# v3.4仕様: セキュリティのためパーミッションをユーザーのみに制限（Unix系）
+import stat as _stat
+_DIR_MODE = _stat.S_IRWXU  # 0o700: owner rwx のみ
 for _d in [DATA_DIR, CHROMA_DIR, CACHE_DIR, LOGS_DIR, MODELS_DIR, HASH_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
+    try:
+        _d.chmod(_DIR_MODE)
+    except (OSError, NotImplementedError):
+        pass  # Windowsでは chmod が制限されるためスキップ
 
 # Embeddingモデル設定（常時ローカル・外部送信なし）
 EMBEDDING_MODEL_ID = "intfloat/multilingual-e5-large"

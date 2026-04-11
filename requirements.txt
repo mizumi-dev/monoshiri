@@ -11,9 +11,8 @@ chromadb>=0.5.0
 sentence-transformers>=3.0.0
 
 # ─── ローカルLLM推論 ──────────────────────────────────────────
-# CPU推論版（GPU版は別途インストール）
-# GPU（CUDA）を使う場合: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-llama-cpp-python>=0.3.0
+# ADR-001: Ollama HTTP API に移行済み（別途インストール: https://ollama.com）
+# llama-cpp-python は不要
 
 # ─── ファイルテキスト抽出 ──────────────────────────────────────
 PyMuPDF>=1.24.0          # PDF (fallback)

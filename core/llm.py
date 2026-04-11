@@ -2,6 +2,11 @@
 モノシリ LLM管理モジュール (Ollama バックエンド)
 Ollama経由でGGUFモデルをローカルGPU推論する。
 外部送信なし・完全ローカル動作。
+
+TODO(仕様書更新): v3.4仕様書はLLMバックエンドとしてllama.cppを記載しているが、
+  ADR-001に基づきOllama HTTP APIに移行済み。仕様書の「技術構成」セクションを更新すること。
+TODO(仕様書更新): 実装では14B/Qwen3.5-9B/Nemotron-Nano-Japaneseの3モデルを追加対応していて、
+  v3.4仕様書には3B/7Bの2モデルのみ記載。仕様書に追加モデルを反映すること。
 """
 from __future__ import annotations
 import json
@@ -46,21 +51,15 @@ def get_available_ram_gb() -> float:
 def recommend_model() -> str:
     """
     総RAMに基づいて推奨モデルを返す。
-    16GB以上 → Qwen2.5-7B（安定・推奨） / 8GB以上 → Qwen2.5-3B
+    v3.4仕様: 全環境で3B（軽量）がデフォルト推奨。
+    16GB以上では7Bも選択可能だが、CPU環境での応答速度を優先し3Bを推奨。
     """
-    total_ram = get_total_ram_gb()
     model_keys = list(LLM_MODELS.keys())
-
-    if total_ram >= 16:
-        for key in model_keys:
-            if "標準" in key or "推奨" in key:
-                return key
-        return model_keys[0]
-    else:
-        for key in model_keys:
-            if "軽量" in key:
-                return key
-        return model_keys[1] if len(model_keys) > 1 else model_keys[0]
+    # 常に軽量（3B）をデフォルト推奨
+    for key in model_keys:
+        if "軽量" in key:
+            return key
+    return model_keys[0] if model_keys else ""
 
 
 # ─── モデルパス管理 ───────────────────────────────────────────
