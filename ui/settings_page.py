@@ -513,21 +513,21 @@ def _render_gpu_settings(config: dict) -> None:
                         if not ollama_running:
                             st.button(
                                 "Ollama未起動",
-                                key=f"ollama_reg_{hash(model_name)}",
+                                key=f"ollama_reg_disabled_{hash(model_name)}",
                                 disabled=True,
                                 use_container_width=True,
                             )
                         elif registered:
                             st.button(
                                 "登録済み",
-                                key=f"ollama_reg_{hash(model_name)}",
+                                key=f"ollama_reg_done_{hash(model_name)}",
                                 disabled=True,
                                 use_container_width=True,
                             )
                         else:
                             if st.button(
                                 "Ollamaに登録",
-                                key=f"ollama_reg_{hash(model_name)}",
+                                key=f"ollama_reg_action_{hash(model_name)}",
                                 use_container_width=True,
                                 type="primary",
                             ):

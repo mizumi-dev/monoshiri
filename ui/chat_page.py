@@ -68,6 +68,11 @@ def render_evidence(evidence: list[dict], key_prefix: str = "ev") -> None:
     if not evidence:
         return
 
+    # key重複を防ぐため、呼び出し回数カウンターを使用
+    counter_key = f"_ev_counter_{key_prefix}"
+    counter = st.session_state.get(counter_key, 0)
+    st.session_state[counter_key] = counter + 1
+
     with st.expander(f"📎 参照元 ({len(evidence)}件)", expanded=True):
         for i, ev in enumerate(evidence):
             file_path_str = ev.get("file_path", "")
@@ -89,10 +94,13 @@ def render_evidence(evidence: list[dict], key_prefix: str = "ev") -> None:
                 file_path = Path(file_path_str) if file_path_str else None
                 file_exists = file_path is not None and file_path.exists()
 
+                # key重複防止: prefix + インデックス + 呼び出し回数 + file_path hash
+                btn_key = f"{key_prefix}_{i}_{counter}_{hash(file_path_str)}"
+
                 if file_exists:
                     if st.button(
                         f"📄 {label}",
-                        key=f"{key_prefix}_{i}_{hash(file_path_str)}",
+                        key=btn_key,
                         use_container_width=True,
                         help=f"クリックしてファイルを開く: {file_path_str}",
                     ):
