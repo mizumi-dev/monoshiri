@@ -57,28 +57,48 @@ def _warmup_model_if_needed() -> None:
     """
     選択済みモデルをバックグラウンドでOllamaにロードする。
     モデルがVRAMにロードされていない場合のみ実行する。
-    SPEED修正: warmup_done フラグではなく /api/ps で実際のロード状態を確認し、
-    アンロード後のコールドスタートを防ぐ。
+
+    PERF修正: /api/ps への HTTP 呼び出しを 10 秒間キャッシュ。
+    ページ切り替えのたびに Ollama HTTP 通信（最大 3 秒）が走っていた問題を解消。
+    モデルがアンロードされた場合も 10 秒以内に再 warmup できる。
     """
+    import time
+    import threading
+    from core.llm import warmup_model, is_model_downloaded, is_model_loaded_in_ollama
+
     selected_model = st.session_state.config.get("selected_model", "")
     if not selected_model:
         return
 
-    import threading
-    from core.llm import warmup_model, is_model_downloaded, is_model_loaded_in_ollama
-
     if not is_model_downloaded(selected_model):
         return
 
-    # すでにVRAMにロード済みなら何もしない
-    if is_model_loaded_in_ollama(selected_model):
-        return
+    # 10 秒間キャッシュ: 前回確認から 10 秒未満なら HTTP 呼び出しをスキップ
+    now = time.monotonic()
+    last_t = st.session_state.get("_ollama_check_t", 0.0)
+    last_loaded = st.session_state.get("_ollama_loaded", False)
+
+    if now - last_t < 10.0:
+        # キャッシュ有効期間内 → 前回結果を再利用
+        if last_loaded:
+            return
+    else:
+        # キャッシュ期限切れ → 実際に確認
+        loaded = is_model_loaded_in_ollama(selected_model)
+        st.session_state._ollama_check_t = now
+        st.session_state._ollama_loaded = loaded
+        if loaded:
+            return
 
     def _run():
         try:
+            # BUG-036修正: Qwen3.x の think 無効化（初回のみ再登録、バックグラウンドで実行）
+            from core.llm import ensure_think_disabled_for_qwen35
+            ensure_think_disabled_for_qwen35(selected_model)
             warmup_model(selected_model)
+            st.session_state._ollama_loaded = True
         except Exception:
-            pass  # プリウォームの失敗はサイレントに無視
+            pass
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -114,9 +134,14 @@ with st.sidebar:
     st.divider()
 
     # サイドバー下部: インデックス統計
+    # PERF修正: 60 秒キャッシュ。毎 rerun の ChromaDB 接続コストを削減。
     try:
-        from core.indexer import get_index_stats
-        stats = get_index_stats()
+        @st.cache_data(ttl=60, show_spinner=False)
+        def _cached_index_stats() -> dict:
+            from core.indexer import get_index_stats
+            return get_index_stats()
+
+        stats = _cached_index_stats()
         if stats["total_chunks"] > 0:
             st.metric("インデックス済み", f"{stats['total_chunks']:,} チャンク")
     except Exception:
@@ -158,4 +183,4 @@ else:
     st.error(f"不明なページ: {page}")
     st.session_state.page = "chat"
     st.rerun()
-# reload-trigger-4
+# reload-trigger-8

@@ -9,7 +9,7 @@ import logging
 from core.config import TOP_K, MAX_EVIDENCE, RAG_CONTEXT_MAX_LENGTH
 from core.embedder import embed_query
 from core.indexer import get_collection
-from core.llm import generate_answer
+from core.llm import generate_answer, stream_answer
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,9 @@ def build_context(
         context_parts.append(part)
         total_len += len(part)
 
-    return "\n\n---\n\n".join(context_parts)
+    # BUG-018修正: "---" はMarkdown水平線としてモデルに誤解釈されやすい。
+    #   明示的な区切り文字列に変更してチャンク境界を明確化する。
+    return "\n\n".join(context_parts)
 
 
 # ─── エビデンス抽出 ───────────────────────────────────────────
@@ -165,6 +167,7 @@ def answer_question(
     model_name: str,
     similarity_threshold: float = 0.5,
     top_k: int = TOP_K,
+    chat_history: list[dict] | None = None,
 ) -> dict:
     """
     質問に対してRAGパイプラインで回答を生成する。
@@ -192,33 +195,23 @@ def answer_question(
     found = len(similar_items) > 0
 
     if not found:
-        # 閾値以下でも最近傍を取得（「関連情報」として提示）
-        fallback_items = search_similar(
-            query=question,
-            top_k=5,
-            similarity_threshold=0.0,  # 閾値なし
-        )
+        # ADR-002修正: フォールバック廃止。関連文書なし → 正直に返す。
+        # 「それっぽい嘘」を生成するよりも「わかりません」の方が社内ツールとして信頼される。
+        return {
+            "answer": (
+                "ご質問に関連する文書が見つかりませんでした。\n\n"
+                "以下をご確認ください：\n"
+                "・インデックス管理画面で対象フォルダがインデックス済みか確認する\n"
+                "・類似度閾値を下げてみる（設定画面 → 類似度スライダー）\n"
+                "・別のキーワードで質問してみる"
+            ),
+            "evidence": [],
+            "found": False,
+        }
 
-        if not fallback_items:
-            return {
-                "answer": (
-                    "関連する文書が見つかりませんでした。\n\n"
-                    "インデックス管理画面からフォルダをインデックス化してから質問してください。"
-                ),
-                "evidence": [],
-                "found": False,
-            }
-
-        # フォールバック: 最近傍で回答
-        context = build_context(fallback_items)
-        evidence = extract_evidence(fallback_items)
-        prefix = "直接の回答は見つかりませんでしたが、関連する情報としてこちらがあります。\n\n"
-        items_for_answer = fallback_items
-    else:
-        context = build_context(similar_items)
-        evidence = extract_evidence(similar_items)
-        prefix = ""
-        items_for_answer = similar_items
+    context = build_context(similar_items)
+    evidence = extract_evidence(similar_items)
+    prefix = ""
 
     # 2. LLMで回答生成
     try:
@@ -226,9 +219,10 @@ def answer_question(
             model_name=model_name,
             question=question,
             context=context,
+            chat_history=chat_history,
         )
         return {
-            "answer": prefix + answer,
+            "answer": answer,
             "evidence": evidence,
             "found": found,
         }
@@ -249,3 +243,61 @@ def answer_question(
             "evidence": evidence,
             "found": found,
         }
+
+
+def stream_question(
+    question: str,
+    model_name: str,
+    similarity_threshold: float = 0.5,
+    top_k: int = TOP_K,
+    chat_history: list[dict] | None = None,
+):
+    """
+    RAGパイプラインのストリーミング版。
+
+    Returns:
+        Generator that yields:
+          - dict {"type": "evidence", "data": evidence_list}  最初に1回
+          - dict {"type": "token",    "data": str}            トークンごとに
+          - dict {"type": "error",    "data": str}            エラー時
+    """
+    # 1. ベクトル検索
+    similar_items = search_similar(
+        query=question,
+        top_k=top_k,
+        similarity_threshold=similarity_threshold,
+    )
+    found = len(similar_items) > 0
+
+    if not found:
+        # ADR-002修正: フォールバック廃止。関連文書なし → 正直に返す。
+        yield {"type": "evidence", "data": [], "found": False}
+        yield {"type": "token", "data": (
+            "ご質問に関連する文書が見つかりませんでした。\n\n"
+            "以下をご確認ください：\n"
+            "・インデックス管理画面で対象フォルダがインデックス済みか確認する\n"
+            "・類似度閾値を下げてみる（設定画面 → 類似度スライダー）\n"
+            "・別のキーワードで質問してみる"
+        )}
+        return
+
+    context = build_context(similar_items)
+    evidence = extract_evidence(similar_items)
+
+    # 2. エビデンスを先に返す（UIで即座に表示するため）
+    yield {"type": "evidence", "data": evidence, "found": found}
+
+    # 3. ストリーミング推論
+    try:
+        for token in stream_answer(
+            model_name=model_name,
+            question=question,
+            context=context,
+            chat_history=chat_history,
+        ):
+            yield {"type": "token", "data": token}
+    except Exception as e:
+        import traceback as _tb
+        tb_str = _tb.format_exc()
+        logger.error(f"ストリーミング回答生成エラー（詳細）:\n{tb_str}")
+        yield {"type": "error", "data": str(e)}

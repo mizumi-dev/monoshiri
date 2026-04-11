@@ -16,7 +16,8 @@ sentence-transformers>=3.0.0
 llama-cpp-python>=0.3.0
 
 # ─── ファイルテキスト抽出 ──────────────────────────────────────
-PyMuPDF>=1.24.0          # PDF
+PyMuPDF>=1.24.0          # PDF (fallback)
+pdfplumber>=0.11.0       # PDF テーブル構造保持抽出（IMPROVE-001）
 python-docx>=1.1.0       # Word (.docx)
 python-pptx>=1.0.0       # PowerPoint (.pptx)
 openpyxl>=3.1.0          # Excel (.xlsx)

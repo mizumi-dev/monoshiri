@@ -6,12 +6,17 @@
 - ファイルサイズ監視による進捗トラッキング
 - キャンセル / リトライ対応
 - Streamlit の @st.fragment(run_every=N) と組み合わせて UI に進捗を反映
+
+ダウンロード実行ロジック（ネットワーク確認・urllib直接DL・HuggingFace Hub DL）も本モジュールで管理。
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -19,6 +24,259 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Streamlit が downloader.py をホットリロードしてもシングルトンが消えないよう
+# sys.modules に保存するためのキー（通常のモジュール名と衝突しない名前を使用）
+_DM_PERSIST_KEY = "_monoshiri_download_manager_v1"
+
+
+# ─── ネットワーク確認・ダウンロード実装 ─────────────────────────
+
+def check_network_connectivity() -> tuple[bool, str]:
+    """
+    ネットワーク接続を簡易チェックする。
+
+    Returns:
+        (接続可能か, メッセージ)
+    """
+    from core.config import HF_MIRROR_URL
+    test_urls = [
+        HF_MIRROR_URL if HF_MIRROR_URL else "https://huggingface.co",
+        "https://huggingface.co",
+        "https://hf-mirror.com",
+    ]
+    seen: set[str] = set()
+    for url in test_urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            req = urllib.request.Request(url, method="HEAD")
+            urllib.request.urlopen(req, timeout=10)
+            return True, f"接続OK: {url}"
+        except Exception:
+            continue
+    return False, (
+        "HuggingFaceに接続できません。\n"
+        "考えられる原因:\n"
+        "  1. インターネット接続がない\n"
+        "  2. ファイアウォール/セキュリティソフトがブロックしている\n"
+        "  3. DNS解決に失敗している\n"
+        "  4. プロキシ設定が必要\n"
+        "\n対処法:\n"
+        "  - ブラウザで https://huggingface.co にアクセスできるか確認\n"
+        "  - セキュリティソフトの一時停止を試す\n"
+        "  - 設定画面の「手動ダウンロード」からブラウザ経由でモデルを入手\n"
+    )
+
+
+def download_with_urllib(url: str, dest_path: Path, progress_callback=None) -> bool:
+    """
+    urllib を使ってファイルを直接ダウンロードする（huggingface_hub不要のフォールバック）。
+
+    Args:
+        url: ダウンロード元URL
+        dest_path: 保存先パス
+        progress_callback: 進捗コールバック（0.0〜1.0）
+
+    Returns:
+        成功した場合True
+    """
+    from core.config import DOWNLOAD_TIMEOUT
+    tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
+    try:
+        logger.info(f"直接ダウンロード開始: {url}")
+        req = urllib.request.Request(url, headers={"User-Agent": "monoshiri/1.0"})
+        response = urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT)
+
+        total_size = int(response.headers.get("Content-Length", 0))
+        downloaded = 0
+        chunk_size = 1024 * 1024  # 1MB
+
+        with open(tmp_path, "wb") as f:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if progress_callback and total_size > 0:
+                    progress_callback(downloaded / total_size)
+
+        tmp_path.rename(dest_path)
+        logger.info(f"直接ダウンロード完了: {dest_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"直接ダウンロードエラー: {e}")
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return False
+
+
+def download_model(model_name: str, progress_callback=None) -> tuple[bool, str]:
+    """
+    HuggingFaceからGGUFモデルをダウンロードする。
+    リトライ・ミラー・直接ダウンロードの3段階フォールバック対応。
+
+    Args:
+        model_name: LLM_MODELSのキー
+        progress_callback: 進捗コールバック（0.0〜1.0）
+
+    Returns:
+        (成功したか, メッセージ)
+    """
+    from core.config import (
+        LLM_MODELS, MODELS_DIR,
+        DOWNLOAD_MAX_RETRIES, HF_MIRROR_URL, GGUF_DIRECT_URLS,
+    )
+
+    if model_name not in LLM_MODELS:
+        return False, f"未定義のモデル: {model_name}"
+
+    model_info = LLM_MODELS[model_name]
+    repo_id = model_info.get("repo_id")
+    filename = model_info["filename"]
+
+    if not repo_id:
+        return False, f"カスタムモデルはHFダウンロード非対応: {model_name}"
+
+    model_dir = MODELS_DIR / "llm"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = model_dir / filename
+
+    if dest_path.exists():
+        return True, "モデルは既にダウンロード済みです"
+
+    errors = []
+
+    # ── 方法1: urllib で直接ダウンロード（進捗コールバック対応・優先） ──
+    # hf_hub_download は progress_callback 非対応のため、直接URLがある場合は urllib を優先する。
+    # これにより UI の進捗バーがリアルタイム更新される。
+    direct_url = GGUF_DIRECT_URLS.get(filename)
+    if direct_url:
+        effective_url = direct_url
+        if HF_MIRROR_URL:
+            effective_url = effective_url.replace("https://huggingface.co", HF_MIRROR_URL)
+        logger.info(f"urllib で直接ダウンロード開始: {effective_url}")
+        if download_with_urllib(effective_url, dest_path, progress_callback):
+            return True, "ダウンロード完了"
+        errors.append(f"直接ダウンロード失敗: {effective_url}")
+        logger.warning("直接ダウンロード失敗。huggingface_hub にフォールバック...")
+
+    # ── 方法2: huggingface_hub 経由（リトライ付き・フォールバック） ──
+    # 直接URLがない場合、または urllib 失敗時のフォールバック。
+    # ※進捗バーはファイルサイズ監視スレッドで概算更新される（精度低め）。
+    try:
+        from huggingface_hub import hf_hub_download
+
+        for attempt in range(1, DOWNLOAD_MAX_RETRIES + 1):
+            try:
+                logger.info(
+                    f"[{attempt}/{DOWNLOAD_MAX_RETRIES}] "
+                    f"huggingface_hub で {repo_id}/{filename} をダウンロード中..."
+                )
+                kwargs = dict(
+                    repo_id=repo_id,
+                    filename=filename,
+                    local_dir=str(model_dir),
+                    local_dir_use_symlinks=False,
+                )
+                if HF_MIRROR_URL:
+                    kwargs["endpoint"] = HF_MIRROR_URL
+                hf_hub_download(**kwargs)
+                return True, "ダウンロード完了"
+
+            except Exception as e:
+                err_msg = str(e)
+                errors.append(f"hf_hub 試行{attempt}: {err_msg}")
+                logger.warning(f"ダウンロード試行 {attempt} 失敗: {err_msg}")
+                if attempt < DOWNLOAD_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    logger.info(f"{wait}秒後にリトライ...")
+                    time.sleep(wait)
+
+    except ImportError:
+        errors.append("huggingface_hub がインストールされていません")
+
+    # ── 全て失敗 ──
+    if dest_path.exists():
+        dest_path.unlink()
+
+    error_detail = "\n".join(errors)
+    manual_url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+    msg = (
+        f"自動ダウンロードに失敗しました。\n\n"
+        f"【エラー詳細】\n{error_detail}\n\n"
+        f"【手動ダウンロード方法】\n"
+        f"1. ブラウザで以下のURLを開いてダウンロード：\n"
+        f"   {manual_url}\n"
+        f"2. ダウンロードしたファイルを以下のフォルダに配置：\n"
+        f"   {model_dir}\n"
+        f"3. アプリを再起動\n\n"
+        f"【その他の対処法】\n"
+        f"- セキュリティソフトを一時停止してリトライ\n"
+        f"- 設定画面で「HFミラーURL」を設定\n"
+        f"  （例: https://hf-mirror.com）"
+    )
+    return False, msg
+
+
+def download_hf_model(repo_id: str, filename: str, display_name: str) -> str | None:
+    """
+    任意のHuggingFaceリポジトリからGGUFをダウンロードしてカスタムモデルとして登録する。
+
+    Returns:
+        成功時は表示名（キー）、失敗時はNone
+    """
+    from core.config import LLM_MODELS, MODELS_DIR
+
+    model_dir = MODELS_DIR / "llm"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = model_dir / filename
+
+    try:
+        from huggingface_hub import hf_hub_download
+        logger.info(f"{repo_id}/{filename} をダウンロード中...")
+        hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=str(model_dir),
+            local_dir_use_symlinks=False,
+        )
+
+        key = f"{display_name}（カスタム）"
+        LLM_MODELS[key] = {
+            "repo_id": repo_id,
+            "filename": filename,
+            "size_gb": round(dest_path.stat().st_size / (1024 ** 3), 1),
+            "min_ram_gb": 8,
+            "speed": "不明",
+            "description": f"HF: {repo_id}/{filename}",
+            "chat_template": "chatml",
+        }
+        _save_custom_models()
+        return key
+
+    except Exception as e:
+        logger.error(f"ダウンロードエラー: {e}")
+        if dest_path.exists():
+            dest_path.unlink()
+        return None
+
+
+def _save_custom_models() -> None:
+    """カスタムモデル定義を保存する（downloader内部用）"""
+    from core.config import LLM_MODELS, MODELS_DIR
+    custom_file = MODELS_DIR / "custom_models.json"
+    custom = {
+        name: info
+        for name, info in LLM_MODELS.items()
+        if "（カスタム）" in name
+    }
+    custom_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(custom_file, "w", encoding="utf-8") as f:
+        json.dump(custom, f, ensure_ascii=False, indent=2)
 
 
 # ─── ジョブ状態 ───────────────────────────────────────────────
@@ -108,10 +366,21 @@ class DownloadManager:
 
     @classmethod
     def get(cls) -> "DownloadManager":
-        """シングルトンインスタンスを返す"""
+        """シングルトンインスタンスを返す。
+        Streamlit のホットリロードでモジュールが再ロードされても
+        sys.modules 経由で同じインスタンスを返し、ダウンロード状態を保持する。
+        """
+        import sys
         with cls._instance_lock:
+            # まず sys.modules から既存インスタンスを復元する
+            existing = sys.modules.get(_DM_PERSIST_KEY)
+            if existing is not None and hasattr(existing, '_jobs') and hasattr(existing, '_lock'):
+                cls._instance = existing
+                return cls._instance
+            # なければ新規作成して sys.modules に保存
             if cls._instance is None:
                 cls._instance = cls()
+            sys.modules[_DM_PERSIST_KEY] = cls._instance
         return cls._instance
 
     def __init__(self) -> None:
@@ -257,7 +526,6 @@ class DownloadManager:
 
     def _run_job(self, job: DownloadJob) -> None:
         """1件のダウンロードを実行する"""
-        from core.llm import download_model
         from core.config import LLM_MODELS, MODELS_DIR
 
         # ── ジョブ開始 ──
@@ -342,10 +610,13 @@ class DownloadManager:
         last_time = time.monotonic()
 
         while not stop_event.wait(0.5):
-            # HuggingFace Hub の一時ファイル候補
+            # 一時ファイル候補
+            # - urllib 使用時: .gguf.tmp  (download_with_urllib の tmp_path)
+            # - huggingface_hub 使用時: .gguf.incomplete / stem.incomplete
             candidates = [
-                dest_path.parent / (dest_path.name + ".incomplete"),
-                dest_path.parent / (dest_path.stem + ".incomplete"),
+                dest_path.with_suffix(dest_path.suffix + ".tmp"),   # urllib
+                dest_path.parent / (dest_path.name + ".incomplete"), # hf_hub (old)
+                dest_path.parent / (dest_path.stem + ".incomplete"), # hf_hub (alt)
                 dest_path,
             ]
             for path in candidates:

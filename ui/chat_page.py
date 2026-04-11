@@ -15,6 +15,7 @@ import streamlit as st
 from core.config import (
     load_config, save_config,
     HISTORY_FILE, DEFAULT_SIMILARITY, TOP_K,
+    SAMPLE_QUESTIONS,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,13 @@ def clear_history() -> None:
 
 # ─── エビデンス表示コンポーネント ─────────────────────────────
 
-def render_evidence(evidence: list[dict]) -> None:
-    """エビデンス（出典情報）を表示する。クリックでファイルを開く。"""
+def render_evidence(evidence: list[dict], key_prefix: str = "ev") -> None:
+    """エビデンス（出典情報）を表示する。クリックでファイルを開く。
+
+    Args:
+        evidence: 出典情報のリスト
+        key_prefix: ボタンキーの接頭辞。複数箇所から呼ぶ場合は一意の値を渡す
+    """
     if not evidence:
         return
 
@@ -86,7 +92,7 @@ def render_evidence(evidence: list[dict]) -> None:
                 if file_exists:
                     if st.button(
                         f"📄 {label}",
-                        key=f"ev_{i}_{hash(file_path_str)}",
+                        key=f"{key_prefix}_{i}_{hash(file_path_str)}",
                         use_container_width=True,
                         help=f"クリックしてファイルを開く: {file_path_str}",
                     ):
@@ -163,67 +169,165 @@ def _render_chat_tab(config: dict) -> None:
             pass
 
     with col_chat:
-        # チャット履歴表示（セッション内）
-        for msg in st.session_state.get("chat_messages", []):
+        # ─── Free層 使用量バナー ────────────────────────────────
+        try:
+            from core.usage_tracker import get_usage_summary
+            usage = get_usage_summary()
+            q_remaining = usage["questions_remaining"]
+            q_max       = usage["questions_max"]
+            month_str   = usage["month"]
+
+            if usage["questions_limit_reached"]:
+                st.warning(
+                    f"⚠️ **{month_str}の質問数が上限（{q_max}回）に達しました。**  \n"
+                    "来月1日にリセットされます。（β期間中は引き続きご利用いただけます）",
+                    icon=None,
+                )
+            elif q_remaining <= 30:
+                st.info(
+                    f"📊 {month_str}の残り質問数: **{q_remaining}回** / {q_max}回",
+                    icon=None,
+                )
+        except Exception:
+            pass  # 使用量取得失敗はサイレント
+
+        # ─── チャット履歴表示（セッション内）────────────────────
+        chat_messages = st.session_state.get("chat_messages", [])
+        # BUG-010修正: render_evidence に msg インデックスを含む一意のキーを渡す。
+        #   複数ターンで同じファイルが参照元に現れると key が衝突する。
+        for i_msg, msg in enumerate(chat_messages):
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
                 if msg["role"] == "assistant" and msg.get("evidence"):
-                    render_evidence(msg["evidence"])
+                    render_evidence(msg["evidence"], key_prefix=f"ev_{i_msg}")
 
-        # 入力が無効な場合の警告
+        # ─── 入力が無効な場合の警告 ──────────────────────────
         disabled = not selected_model or not folders or st.session_state.get("indexing", False)
 
         if not selected_model:
             st.info("💡 まず **設定** 画面でAIモデルをダウンロードしてください。")
         elif not folders:
             st.info("💡 まず **インデックス管理** 画面でフォルダを追加してください。")
+        elif not chat_messages:
+            # ─── 初回表示: 固定サンプル質問3件（v3.4確定文言）──
+            st.markdown("#### 💬 何でも聞いてください")
+            st.caption("例えば、こんな質問から始めてみてください：")
+            for i, sq in enumerate(SAMPLE_QUESTIONS):
+                if st.button(f"📄 {sq}", key=f"sample_q_{i}", use_container_width=True):
+                    # サンプル質問をクリックした場合、promptとして処理
+                    st.session_state["_pending_prompt"] = sq
+                    st.rerun()
 
-        # チャット入力
-        if prompt := st.chat_input(
-            "社内資料について質問してください...",
+        # ─── サンプル質問クリック後の処理 ───────────────────────
+        pending_prompt = st.session_state.pop("_pending_prompt", None)
+
+        # ─── チャット入力 ─────────────────────────────────────
+        prompt = st.chat_input(
+            "社内資料について質問してください（2,000文字以内）...",
             disabled=disabled,
-        ):
-            # ユーザーメッセージを追加
+        ) or pending_prompt
+
+        if prompt:
+            # 2,000文字制限（v3.4: プロンプトインジェクション対策）
+            prompt = prompt[:2000]
+
+            # 送信時点で質問数を1カウント（再試行はカウントしない）
+            try:
+                from core.usage_tracker import increment_question_count, is_question_limit_reached
+                if is_question_limit_reached():
+                    st.warning("今月の質問数上限に達しています。（β期間中は引き続き利用可）")
+                else:
+                    increment_question_count()
+            except Exception:
+                pass
+
+            # ユーザーメッセージをセッション状態に追加
             if "chat_messages" not in st.session_state:
                 st.session_state.chat_messages = []
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
 
+            # BUG-001修正: LLMに渡す会話履歴を取得（現在の質問の直前まで）
+            # 最後の要素（今追加したユーザーメッセージ）は stream_question 内で追加されるため除く
+            history_for_llm = st.session_state.chat_messages[:-1]
+
+            # ── ユーザーメッセージを画面に表示（BUG-002修正で削除してしまっていた）──
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            # 回答生成
+            # 回答生成（ストリーミング + BUG-002修正）
+            # ストリーミング表示は維持しつつ、完了後にst.rerun()で
+            # 履歴ループから一貫したレンダリングに切り替える
+            full_answer = ""
+            error_msg = None
+            evidence_list = []
+
+            # ─── ストリーミング表示エリア ───────────────────────────
             with st.chat_message("assistant"):
-                with st.spinner("🔍 文書を検索中..."):
-                    try:
-                        from core.rag import answer_question
-                        result = answer_question(
+                try:
+                    from core.rag import stream_question
+                    answer_parts = []
+
+                    # エビデンスと回答のプレースホルダを用意
+                    evidence_placeholder = st.empty()
+                    answer_placeholder = st.empty()
+
+                    with st.spinner("🔍 文書を検索中..."):
+                        stream = stream_question(
                             question=prompt,
                             model_name=selected_model,
                             similarity_threshold=new_sim,
                             top_k=TOP_K,
+                            chat_history=history_for_llm,  # BUG-001修正
+                        )
+                        # 最初のイベントはエビデンス
+                        first = next(stream, None)
+                        if first and first["type"] == "evidence":
+                            evidence_list = first["data"]
+
+                    # エビデンスを即座に表示
+                    with evidence_placeholder.container():
+                        render_evidence(evidence_list, key_prefix="cur")
+
+                    # トークンをストリーミング表示しながらバッファに蓄積
+                    for event in stream:
+                        if event["type"] == "token":
+                            answer_parts.append(event["data"])
+                            answer_placeholder.markdown("".join(answer_parts))
+                        elif event["type"] == "error":
+                            error_msg = event["data"]
+                            break
+
+                    full_answer = "".join(answer_parts)
+                    if error_msg:
+                        answer_placeholder.error(
+                            f"エラーが発生しました:\n\n```\n{error_msg[:400]}\n```"
                         )
 
-                        st.markdown(result["answer"])
-                        render_evidence(result["evidence"])
+                except Exception as e:
+                    import traceback as _tb
+                    tb_str = _tb.format_exc()
+                    logger.error(f"チャットエラー（詳細）:\n{tb_str}")
+                    error_msg = str(e)[:400]
+                    st.error(f"エラーが発生しました: {error_msg}")
 
-                        # セッション履歴に追加
-                        st.session_state.chat_messages.append({
-                            "role": "assistant",
-                            "content": result["answer"],
-                            "evidence": result["evidence"],
-                        })
+            # BUG-002修正: セッション状態に保存してから st.rerun() で再描画
+            # → 履歴ループからの一貫したレンダリングに切り替え、消える問題を解消
+            final_content = full_answer if full_answer else (
+                f"エラーが発生しました:\n\n```\n{error_msg}\n```" if error_msg
+                else "回答を生成できませんでした。"
+            )
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": final_content,
+                "evidence": evidence_list,
+            })
 
-                        # 永続履歴に保存
-                        save_to_history(prompt, result["answer"], result["evidence"])
+            # 永続履歴に保存
+            if full_answer:
+                save_to_history(prompt, full_answer, evidence_list)
 
-                    except Exception as e:
-                        error_msg = f"エラーが発生しました:\n\n```\n{str(e)[:400]}\n```"
-                        st.error(error_msg)
-                        st.session_state.chat_messages.append({
-                            "role": "assistant",
-                            "content": error_msg,
-                            "evidence": [],
-                        })
+            # BUG-002修正: rerun で上部の履歴ループから一貫してレンダリング
+            st.rerun()
 
         # 会話クリアボタン
         if st.session_state.get("chat_messages"):
@@ -264,7 +368,7 @@ def _render_history_tab() -> None:
         return
 
     # 新しい順に最大50件表示
-    for item in reversed(filtered[-50:]):
+    for idx, item in enumerate(reversed(filtered[-50:])):
         ts = item.get("timestamp", "")
         q = item.get("question", "")
         a = item.get("answer", "")
@@ -287,7 +391,7 @@ def _render_history_tab() -> None:
             st.divider()
             st.markdown(f"**💬 回答：**\n\n{a}")
             if ev:
-                render_evidence(ev)
+                render_evidence(ev, key_prefix=f"hist_{idx}")
 
     st.divider()
     if st.button("🗑️ 履歴をすべて削除", key="clear_all_history"):

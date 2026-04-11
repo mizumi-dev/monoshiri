@@ -91,27 +91,58 @@ def extract_text(file_path: Path) -> tuple[list[dict], str | None]:
     return [], "未対応形式"
 
 
-def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
-    """PyMuPDFを使いページごとにテキスト抽出
+def _extract_pdf(file_path: Path) -> tuple[list[dict], str | None]:
+    """pdfplumberを使いページごとにテキスト抽出（テーブル構造保持）
 
-    BUG-027修正: get_text("text") → get_text("blocks") + 座標ソート
-    財務PDFの表構造（年度×指標）を保持するため、テキストブロックをY座標→X座標順に
-    ソートし直す。これにより列単位での誤抽出を防ぎ、行単位の自然読み順を保持する。
-    round(b[1] / 10) でY座標を10px単位に丸め、同一行の左右ブロックをX座標で並べる。
+    IMPROVE-001: PyMuPDF get_text("blocks")+座標ソート方式 → pdfplumber extract_text() 方式に変更。
+    pdfplumberは文字の座標情報を使い、行の空間的レイアウト（列の位置）を保持したまま
+    テキストを再構成するため、財務諸表のテーブル（年度別売上高、役員一覧等）を
+    LLMが理解しやすい形式で抽出できる。
+
+    例（Apple損益計算書）:
+      PyMuPDF → 列方向に分断されたブロックの羅列
+      pdfplumber → "Total net sales 416,161 391,035 383,285"（列ヘッダーと値が同一行）
+
+    フォールバック: pdfplumberが失敗した場合はPyMuPDFで再試行。
     """
-    import fitz  # PyMuPDF
-
     page_chunks = []
+
+    # ── pdfplumber（メイン） ──────────────────────────────────────
+    try:
+        import pdfplumber as _pdfplumber
+
+        with _pdfplumber.open(str(file_path)) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    text = page.extract_text(x_tolerance=3, y_tolerance=3)
+                    if text and text.strip():
+                        page_chunks.append({
+                            "text": text.strip(),
+                            "page": page_num + 1,
+                            "slide": None,
+                        })
+                except Exception as e:
+                    logger.debug(f"pdfplumber page {page_num + 1} 失敗 ({file_path.name}): {e}")
+
+        if page_chunks:
+            return page_chunks, None
+
+    except ImportError:
+        logger.warning(f"pdfplumberが未インストールです。PyMuPDFにフォールバックします。")
+    except Exception as e:
+        logger.warning(f"pdfplumber 失敗、PyMuPDFにフォールバック ({file_path.name}): {e}")
+
+    # ── PyMuPDF フォールバック ────────────────────────────────────
+    page_chunks = []
+    import fitz  # PyMuPDF
     doc = fitz.open(str(file_path))
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
-            # blocks = [(x0, y0, x1, y1, text, block_no, block_type), ...]
             blocks = page.get_text("blocks")
-            # テキストブロック(block_type==0)のみ、Y→X座標順でソート
             text_blocks = sorted(
                 [b for b in blocks if b[6] == 0],
-                key=lambda b: (round(b[1] / 10), b[0])  # 行単位(10px)でY→X
+                key=lambda b: (round(b[1] / 10), b[0])
             )
             text = "\n".join(b[4].strip() for b in text_blocks if b[4].strip())
             if text:
@@ -123,6 +154,9 @@ def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
     finally:
         doc.close()
 
+    if not page_chunks:
+        return [], "PDFからテキストを抽出できませんでした"
+
     return page_chunks, None
 
 
@@ -130,10 +164,6 @@ def _extract_docx(file_path: Path) -> tuple[list[dict], None]:
     """python-docxを使い全文テキスト抽出
 
     CHUNK-002修正: セクションヘッダーを各テキスト行にプレフィックスとして付与。
-    Heading スタイルを検出して current_heading を更新し、後続の段落・テーブル行に
-    「[見出し]」プレフィックスを付ける。チャンク分割後も「どのセクションか」が保持される。
-    テーブルは行単位で「セル1 | セル2 | ...」形式に変換し、行の意味関係を保持する。
-    結合セルの重複はXML要素IDで検出して排除する。
     """
     from docx import Document
 
@@ -141,7 +171,6 @@ def _extract_docx(file_path: Path) -> tuple[list[dict], None]:
     texts: list[str] = []
     current_heading: str = ""
 
-    # 段落テキスト（見出し検出付き）
     for para in doc.paragraphs:
         stripped = para.text.strip()
         if not stripped:
@@ -163,11 +192,9 @@ def _extract_docx(file_path: Path) -> tuple[list[dict], None]:
             else:
                 texts.append(stripped)
 
-    # テーブル（行単位で構造化・見出しコンテキスト付与）
     for table in doc.tables:
         header_cells: list[str] = []
         for row_idx, row in enumerate(table.rows):
-            # 結合セルの重複をXML要素IDで排除
             seen: set[int] = set()
             row_cells: list[str] = []
             for cell in row.cells:
@@ -181,11 +208,9 @@ def _extract_docx(file_path: Path) -> tuple[list[dict], None]:
                 continue
 
             if row_idx == 0:
-                # 最初の行をヘッダー候補として記録
                 header_cells = row_cells
                 row_line = " | ".join(non_empty)
             else:
-                # ヘッダーと値を対応付けて「ヘッダー: 値」形式で出力
                 if header_cells:
                     parts: list[str] = []
                     for header, value in zip(header_cells, row_cells):
@@ -217,7 +242,6 @@ def _extract_pptx(file_path: Path) -> tuple[list[dict], None]:
     for slide_num, slide in enumerate(prs.slides, start=1):
         texts: list[str] = []
         for shape in slide.shapes:
-            # テキストフレームを持つシェイプ
             if hasattr(shape, "text_frame"):
                 for para in shape.text_frame.paragraphs:
                     text = para.text.strip()
@@ -225,7 +249,6 @@ def _extract_pptx(file_path: Path) -> tuple[list[dict], None]:
                         texts.append(text)
             elif hasattr(shape, "text") and shape.text.strip():
                 texts.append(shape.text.strip())
-            # テーブル
             if shape.has_table:
                 for row in shape.table.rows:
                     for cell in row.cells:
@@ -244,13 +267,7 @@ def _extract_pptx(file_path: Path) -> tuple[list[dict], None]:
 
 
 def _extract_xlsx(file_path: Path) -> tuple[list[dict], None]:
-    """openpyxlを使い行列関係を保持してテキスト抽出
-
-    CHUNK-003修正: 最初の非空行をヘッダーとして読み取り、以降のデータ行を
-    「ヘッダー: 値 | ヘッダー: 値 ...」形式で出力する。
-    シート名をプレフィックスとして付与することで、チャンク後も列の意味が保持される。
-    例: [損益計算書] 売上高: 7,623,374 | 営業利益: 523,812
-    """
+    """openpyxlを使い行列関係を保持してテキスト抽出（CHUNK-003修正）"""
     import openpyxl
 
     wb = openpyxl.load_workbook(str(file_path), data_only=True, read_only=True)
@@ -263,24 +280,20 @@ def _extract_xlsx(file_path: Path) -> tuple[list[dict], None]:
         sheet_texts: list[str] = []
 
         for row in sheet.iter_rows(values_only=True):
-            # None → 空文字列に統一
             cell_values = [
                 str(c).strip() if (c is not None and str(c).strip().lower() != "none") else ""
                 for c in row
             ]
 
-            # 全空行はスキップ
             if not any(cell_values):
                 continue
 
             if not header_row:
-                # 最初の非空行をヘッダー候補に
                 header_row = cell_values
                 header_line = " | ".join(v for v in header_row if v)
                 if header_line:
                     sheet_texts.append(f"{prefix}{header_line}")
             else:
-                # データ行: ヘッダーと対応付けて「ヘッダー: 値」形式で出力
                 parts: list[str] = []
                 for i, value in enumerate(cell_values):
                     if not value:
@@ -304,13 +317,12 @@ def _extract_xlsx(file_path: Path) -> tuple[list[dict], None]:
 
 def _extract_text_file(file_path: Path) -> tuple[list[dict], str | None]:
     """テキスト・CSV・Markdownファイルを読み込む"""
-    # 文字コードを順番に試みる
     for encoding in ("utf-8", "utf-8-sig", "shift_jis", "cp932", "euc_jp", "latin-1"):
         try:
             text = file_path.read_text(encoding=encoding).strip()
             if text:
                 return [{"text": text, "page": None, "slide": None}], None
-            return [], None  # 空ファイル
+            return [], None
         except UnicodeDecodeError:
             continue
         except Exception as e:
@@ -327,7 +339,6 @@ def scan_folder(folder_path: Path) -> list[Path]:
     files: list[Path] = []
     try:
         for f in folder_path.rglob("*"):
-            # 隠しファイル・フォルダをスキップ
             if any(part.startswith(".") for part in f.parts):
                 continue
             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
@@ -342,7 +353,6 @@ def estimate_index_time(file_count: int) -> str:
     """ファイル数から処理時間を見積もる（目安）"""
     if file_count == 0:
         return "0秒"
-    # 経験則: 1ファイル約2秒（Embedding含む）
     seconds = file_count * 2
     if seconds < 60:
         return f"約{seconds}秒"

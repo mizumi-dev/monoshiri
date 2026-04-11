@@ -8,6 +8,7 @@ import json
 import logging
 import subprocess
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,6 +21,11 @@ from core.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# BUG-037修正: ollama rm→create のアトミック性を保証するロック
+# RLock（再入可能）を使用し、force_reregister_model が register_model_with_ollama を
+# 呼んでもデッドロックが起きないようにする。
+_OLLAMA_REGISTER_LOCK = threading.RLock()
 
 # カスタムモデルの永続化ファイル
 CUSTOM_MODELS_FILE = MODELS_DIR / "custom_models.json"
@@ -268,6 +274,9 @@ def register_model_with_ollama(model_name: str) -> None:
 
     # Modelfile: GGUFパスを絶対パスで指定。num_gpu 99 でVRAM上限まで自動オフロード
     # 14B（8.9GB）はRTX 4060 Ti（8GB VRAM）で部分オフロード、残りはRAMで処理
+    # BUG-037b修正: "PARAMETER think false" を Modelfile から除去。
+    #   この Ollama バージョンでは未サポートのパラメータで ollama create が rc=1 で失敗する。
+    #   think 抑制は stream_answer / generate_answer の API ペイロード ("think": False) で実施済み。
     modelfile_content = (
         f"FROM {model_path.as_posix()}\n"
         f"PARAMETER num_gpu 99\n"
@@ -285,23 +294,72 @@ def register_model_with_ollama(model_name: str) -> None:
         tf.write(modelfile_content)
         modelfile_path = tf.name
 
-    try:
-        result = subprocess.run(
-            ["ollama", "create", ollama_name, "-f", modelfile_path],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"ollama createが失敗しました:\n{result.stderr.strip()}"
-            )
-        logger.info(f"Ollama登録完了: {ollama_name}")
-    finally:
+    # BUG-037修正: _OLLAMA_REGISTER_LOCK で同時 ollama create を防ぐ
+    with _OLLAMA_REGISTER_LOCK:
         try:
-            Path(modelfile_path).unlink()
-        except Exception:
-            pass
+            result = subprocess.run(
+                ["ollama", "create", ollama_name, "-f", modelfile_path],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                # BUG-037修正: result.stderr が None になるケース（race condition等）への対処
+                # Ollamaはエラーをstdoutに書くこともあるため両方チェック
+                stderr_msg = (result.stderr or "").strip()
+                stdout_msg = (result.stdout or "").strip()
+                detail = stderr_msg or stdout_msg or "(no output)"
+                raise RuntimeError(
+                    f"ollama createが失敗しました (rc={result.returncode}):\n{detail}"
+                )
+            logger.info(f"Ollama登録完了: {ollama_name}")
+        finally:
+            try:
+                Path(modelfile_path).unlink()
+            except Exception:
+                pass
+
+
+def force_reregister_model(model_name: str) -> None:
+    """Ollama から既存登録を削除して再登録する（Modelfile 変更時に使用）。
+    BUG-037修正: _OLLAMA_REGISTER_LOCK を保持したまま rm→create するため、
+    他スレッドが rm と create の間に割り込んで create を実行することを防ぐ。
+    RLock なので同スレッドからの register_model_with_ollama 呼び出しは再入可能。
+    """
+    with _OLLAMA_REGISTER_LOCK:
+        model_info = LLM_MODELS.get(model_name, {})
+        ollama_name = model_info.get("ollama_name", "")
+        if ollama_name:
+            try:
+                subprocess.run(
+                    ["ollama", "rm", ollama_name],
+                    capture_output=True, timeout=30,
+                )
+                logger.info(f"Removed from Ollama: {ollama_name}")
+            except Exception as e:
+                logger.warning(f"ollama rm skipped: {e}")
+        register_model_with_ollama(model_name)
+
+
+def ensure_think_disabled_for_qwen35(model_name: str) -> None:
+    """BUG-036: Qwen3.x モデルが PARAMETER think false 付き Modelfile で
+    登録されていることを保証する。フラグファイルで初回のみ実行。"""
+    if "Qwen3" not in model_name:
+        return
+    from core.config import CACHE_DIR
+    flag_file = CACHE_DIR / ".think_fix_v1"
+    if flag_file.exists():
+        return
+    if not is_model_downloaded(model_name):
+        return
+    logger.info(f"BUG-036: re-registering {model_name} with think=false ...")
+    try:
+        force_reregister_model(model_name)
+        flag_file.write_text("think_fix_v1_applied\n", encoding="utf-8")
+        logger.info("BUG-036: think fix applied.")
+    except Exception as e:
+        logger.warning(f"BUG-036: think fix failed: {e}")
 
 
 # ─── 回答生成 ──────────────────────────────────────────────────
@@ -460,7 +518,14 @@ def generate_answer(
     # 未登録の場合は自動登録
     if not is_registered_with_ollama(model_name):
         logger.info(f"Ollamaに未登録のため自動登録します: {model_name}")
-        register_model_with_ollama(model_name)
+        try:
+            register_model_with_ollama(model_name)
+        except Exception as _reg_err:
+            # BUG-037修正: レース条件対応 - 再チェックで登録済みなら続行
+            if is_registered_with_ollama(model_name):
+                logger.info(f"再チェックで登録確認: {model_name}")
+            else:
+                raise
 
     model_info = LLM_MODELS.get(model_name, {})
     ollama_name = model_info.get("ollama_name", "")
@@ -652,7 +717,15 @@ def stream_answer(
 
     if not is_registered_with_ollama(model_name):
         logger.info(f"Ollamaに未登録のため自動登録します: {model_name}")
-        register_model_with_ollama(model_name)
+        try:
+            register_model_with_ollama(model_name)
+        except Exception as _reg_err:
+            # BUG-037修正: バックグラウンドスレッドとのレース条件で登録失敗しても
+            # 再チェックして登録済みなら続行（同時実行で他スレッドが完了した場合）
+            if is_registered_with_ollama(model_name):
+                logger.info(f"再チェックで登録確認: {model_name}（レース条件で別スレッドが完了）")
+            else:
+                raise
 
     model_info = LLM_MODELS.get(model_name, {})
     ollama_name = model_info.get("ollama_name", "")
@@ -744,9 +817,14 @@ def stream_answer(
             #   天気などの無関係クエリ: thinking が80+秒継続（infinite loop的）→ 90秒で打ち切り
             #   JR東日本等の有効クエリ: thinking が ~30-50秒で完了 → 90秒以内で正常回答
             #   20秒では有効クエリのthinkingも打ち切ってしまい "情報なし" 誤回答が発生していた
+            # BUG-036修正: タイムアウト値を90→300秒に変更
+            #   Qwen3.5-9B使用時にthink:False + /no_think 設定でも全クエリでthinkingが発動。
+            #   英語PDF（米国企業財務報告書）に対する日本語質問では thinking が130〜170秒継続。
+            #   90秒タイムアウトでは全件「社内文書に含まれていません」誤回答になる問題を修正。
+            #   300秒ならほぼすべての正規クエリでthinkingが完了して正答が得られる。
             import time as _time
             _think_start_time: float | None = None
-            _THINK_TIMEOUT_SECS = 90  # 90秒以上thinkingが続いたら打ち切り
+            _THINK_TIMEOUT_SECS = 300  # BUG-036: 90→300秒（Qwen3.5-9B thinking完了待ち）
             # BUG-028修正: Ollamaのstop tokensから除外した自然言語パターンを
             #   ストリーミングフィルタ側で処理するためのリスト。
             #   _in_think=False（回答部分）のみに適用し、thinkingブロック内では無視。
@@ -929,16 +1007,12 @@ def warmup_model(model_name: str) -> bool:
         # 最小リクエストでモデルをVRAMにロード
         _ollama_post("/api/chat", {
             "model": ollama_name,
-            "messages": [{"role": "user", "content": "こんにちは"}],
+            "messages": [{"role": "user", "content": "."}],
             "stream": False,
             "options": {"num_predict": 1},
-            "keep_alive": "30m",  # BUG-031修正: アイドル30分間はVRAMに保持
-        }, timeout=120)           # BUG-031修正: warmup timeout 60s→120s
-        logger.info(f"warmup完了: {ollama_name}")
+        })
+        logger.info(f"warmup complete: {model_name}")
+        return True
     except Exception as e:
-        logger.warning(f"warmup失敗（無視）: {e}")
-
-
-def release_llm() -> None:
-    """後方互換性のためのスタブ。現在は何もしない。"""
-    pass
+        logger.warning(f"warmup failed: {e}")
+        return False

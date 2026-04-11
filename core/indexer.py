@@ -15,7 +15,7 @@ import queue
 import threading
 import time
 import uuid
-from concurrent.futures import CancelledError, ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +26,7 @@ from core.config import (
 from core.extractor import extract_text, scan_folder
 from core.hash_manager import (
     compute_hash, get_diff, load_hashes, save_hashes,
-    make_folder_id, delete_folder_hashes,
+    make_folder_id, delete_folder_hashes, clear_all_hashes,
 )
 from core.embedder import embed_texts
 
@@ -47,10 +47,23 @@ _SENTINEL = None
 
 # ─── ChromaDB ──────────────────────────────────────────────
 
+# PERF修正: PersistentClient をモジュールレベルでシングルトン管理。
+_chroma_client_instance = None
+
+
 def get_chroma_client():
-    """ChromaDBクライアントを取得する"""
-    import chromadb
-    return chromadb.PersistentClient(path=str(CHROMA_DIR))
+    """ChromaDBクライアントを取得する（シングルトン）"""
+    global _chroma_client_instance
+    if _chroma_client_instance is None:
+        import chromadb
+        _chroma_client_instance = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    return _chroma_client_instance
+
+
+def reset_chroma_client() -> None:
+    """インデックス再作成後などクライアントをリセットする際に呼ぶ"""
+    global _chroma_client_instance
+    _chroma_client_instance = None
 
 
 def get_collection():
@@ -137,9 +150,15 @@ def save_skip_log(skip_log: list[dict]) -> None:
 
 def scan_and_diff(
     folder_paths: list[Path],
+    force: bool = False,
 ) -> tuple[list[tuple[Path, str]], list[str]]:
     """
     フォルダをスキャンして差分を検出する。
+
+    Args:
+        folder_paths: 対象フォルダ一覧
+        force: True の場合はSHA-256計算をスキップし全ファイルを対象にする
+               （強制再インデックス時に使用、スキャン速度が大幅に向上）
 
     Returns:
         (files_to_process, deleted_chroma_paths)
@@ -154,10 +173,14 @@ def scan_and_diff(
 
         folder_id = make_folder_id(folder_path)
         folder_files = scan_folder(folder_path)
-        new_or_modified, unchanged, deleted_paths = get_diff(folder_id, folder_files)
 
-        files_to_process.extend([(f, folder_id) for f in new_or_modified])
-        deleted_chroma_paths.extend(deleted_paths)
+        if force:
+            # 強制再インデックス: ハッシュ計算をスキップして全ファイルを対象
+            files_to_process.extend([(f, folder_id) for f in folder_files])
+        else:
+            new_or_modified, unchanged, deleted_paths = get_diff(folder_id, folder_files)
+            files_to_process.extend([(f, folder_id) for f in new_or_modified])
+            deleted_chroma_paths.extend(deleted_paths)
 
     return files_to_process, deleted_chroma_paths
 
@@ -165,17 +188,25 @@ def scan_and_diff(
 # ─── ChromaDBからの削除 ──────────────────────────────────────
 
 def delete_from_chroma(file_paths: list[str]) -> None:
-    """指定ファイルのチャンクをChromaDBから削除する"""
+    """指定ファイルのチャンクをChromaDBから削除する（$in演算子で一括削除）"""
     if not file_paths:
         return
     collection = get_collection()
-    for path in file_paths:
+    # $in演算子で一括フィルタ。50件ずつバッチ処理（ChromaDB制限対策）
+    BATCH = 50
+    for i in range(0, len(file_paths), BATCH):
+        batch = file_paths[i: i + BATCH]
         try:
-            results = collection.get(where={"file_path": path})
+            where = (
+                {"file_path": {"$in": batch}}
+                if len(batch) > 1
+                else {"file_path": batch[0]}
+            )
+            results = collection.get(where=where)
             if results["ids"]:
                 collection.delete(ids=results["ids"])
         except Exception as e:
-            logger.warning(f"ChromaDB削除エラー {path}: {e}")
+            logger.warning(f"ChromaDB一括削除エラー: {e}")
 
 
 def delete_folder_from_index(folder_path: Path) -> None:
@@ -251,16 +282,6 @@ def run_indexing_pipeline(
 ) -> dict:
     """
     Producer-ConsumerパターンでEmbeddingとファイル抽出を並列化する。
-
-    Args:
-        files_to_process: [(file_path, folder_id), ...]
-        collection: ChromaDBコレクション
-        skip_log: スキップログ（参照渡しで追記）
-        cancel_event: キャンセルシグナル（set()されたら停止）
-        progress_callback: 進捗通知 fn(done_count: int, total: int, current_file: str)
-
-    Returns:
-        {"processed": int, "skipped": int, "cancelled": bool}
     """
     total = len(files_to_process)
     if total == 0:
@@ -275,22 +296,27 @@ def run_indexing_pipeline(
 
     # ── Producer: ファイル抽出を並列で実行 ───────────────────────
     def producer():
-        with ThreadPoolExecutor(max_workers=EXTRACT_WORKERS) as pool:
+        pool = ThreadPoolExecutor(max_workers=EXTRACT_WORKERS)
+        try:
             futures = {
                 pool.submit(extract_file_chunks, fp, fid): (fp, fid)
                 for fp, fid in files_to_process
             }
-            for future in futures:
-                if cancel_event.is_set():
-                    future.cancel()
+            for future in as_completed(futures):
                 fp, fid = futures[future]
+                if cancel_event.is_set():
+                    # 未開始のfutureをキャンセルしてスレッドプールを即時解放
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
                 try:
                     result = future.result()
                     chunk_queue.put((fp, fid, result))
                 except Exception as e:
                     logger.error(f"抽出エラー {fp}: {e}")
                     chunk_queue.put((fp, fid, ([], [], str(e))))
-        chunk_queue.put(_SENTINEL)
+        finally:
+            pool.shutdown(wait=False)
+            chunk_queue.put(_SENTINEL)
 
     producer_thread = threading.Thread(target=producer, daemon=True, name="monoshiri-producer")
     producer_thread.start()
@@ -398,10 +424,6 @@ def run_indexing_pipeline(
 
 
 # ─── IndexManager（シングルトン）────────────────────────────────
-#
-# Streamlitのrerunをまたいでインデックス処理の状態を保持する。
-# DownloadManagerと同様のシングルトンパターン。
-# UIはこのクラスを通じて処理を開始・キャンセル・状態参照する。
 
 class IndexManager:
     """
@@ -425,9 +447,7 @@ class IndexManager:
         self._worker: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
 
-        # 状態（UI側から読み取る）
         self.status: str = "idle"
-        # idle | scanning | deleting | indexing | done | cancelled | error
         self.phase_label: str = ""
         self.progress: float = 0.0
         self.done_count: int = 0
@@ -438,8 +458,6 @@ class IndexManager:
         self.result: dict = {}
         self.error_msg: str = ""
 
-    # ── 公開API ────────────────────────────────────────────────
-
     @property
     def is_running(self) -> bool:
         return self._worker is not None and self._worker.is_alive()
@@ -448,10 +466,21 @@ class IndexManager:
     def is_finished(self) -> bool:
         return self.status in ("done", "cancelled", "error")
 
-    def start(self, folders: list[Path]) -> bool:
+    def start_force_reindex(self, folders: list[Path]) -> bool:
+        """
+        全ハッシュをクリアして全件再インデックスを開始する（IMPROVE-001用）。
+        force=True でスキャン時のSHA-256計算をスキップするため高速。
+        """
+        if self.is_running:
+            return False
+        clear_all_hashes()
+        logger.info("全件再インデックス: ハッシュキャッシュをクリアしました")
+        return self.start(folders, force=True)
+
+    def start(self, folders: list[Path], force: bool = False) -> bool:
         """
         インデックス処理をバックグラウンドで開始する。
-        既に実行中の場合はFalseを返す。
+        force=True の場合はスキャン時のSHA-256計算をスキップ。
         """
         if self.is_running:
             return False
@@ -472,7 +501,7 @@ class IndexManager:
 
         self._worker = threading.Thread(
             target=self._run,
-            args=(list(folders),),
+            args=(list(folders), force),
             daemon=True,
             name="monoshiri-indexer",
         )
@@ -480,26 +509,20 @@ class IndexManager:
         return True
 
     def cancel(self) -> None:
-        """実行中のインデックス処理をキャンセルする"""
         self._cancel_event.set()
         self._update(phase_label="⏹️ キャンセル中...")
 
     def reset(self) -> None:
-        """完了・エラー後にidle状態に戻す"""
         if not self.is_running:
             self._update(status="idle", progress=0.0)
 
     def get_elapsed_str(self) -> str:
-        """経過時間を文字列で返す"""
         elapsed = time.time() - self.start_time if self.start_time else 0
         if elapsed >= 60:
             return f"{int(elapsed // 60)}分{int(elapsed % 60)}秒"
         return f"{int(elapsed)}秒"
 
-    # ── 内部処理 ────────────────────────────────────────────────
-
     def _update(self, **kwargs) -> None:
-        """状態を更新する（スレッドセーフ）"""
         with self._lock:
             for k, v in kwargs.items():
                 setattr(self, k, v)
@@ -508,18 +531,16 @@ class IndexManager:
             if self.total_count > 0:
                 self.progress = min(self.done_count / self.total_count, 1.0)
 
-    def _run(self, folders: list[Path]) -> None:
+    def _run(self, folders: list[Path], force: bool = False) -> None:
         """インデックス処理のメインロジック（バックグラウンドスレッドで実行）"""
         try:
-            # ── スキャン & 差分検出 ──
             self._update(status="scanning", phase_label="📂 フォルダをスキャン中...")
-            files_to_process, deleted_paths = scan_and_diff(folders)
+            files_to_process, deleted_paths = scan_and_diff(folders, force=force)
 
             if self._cancel_event.is_set():
                 self._update(status="cancelled", phase_label="キャンセルしました")
                 return
 
-            # ── 削除済みファイルの処理 ──
             if deleted_paths:
                 self._update(
                     status="deleting",
@@ -527,7 +548,6 @@ class IndexManager:
                 )
                 delete_from_chroma(deleted_paths)
 
-            # ── 変更なしの場合 ──
             if not files_to_process:
                 self._update(
                     status="done",
@@ -541,13 +561,11 @@ class IndexManager:
             self._update(
                 status="indexing",
                 total_count=total,
-                phase_label=f"🔄 インデックスを作成中...",
+                phase_label="🔄 インデックスを作成中...",
             )
 
-            # 変更ファイルの旧エントリを削除
             delete_from_chroma([str(f) for f, _ in files_to_process])
 
-            # スキップログの準備
             skip_log = load_skip_log()
             processing_paths = {str(f) for f, _ in files_to_process}
             skip_log = [s for s in skip_log if s["file_path"] not in processing_paths]
@@ -557,7 +575,6 @@ class IndexManager:
             def on_progress(done: int, total_: int, fname: str) -> None:
                 self._update(done_count=done, current_file=fname)
 
-            # ── インデックス処理実行 ──
             result = run_indexing_pipeline(
                 files_to_process=files_to_process,
                 collection=collection,
@@ -583,4 +600,3 @@ class IndexManager:
                 error_msg=str(e),
                 phase_label="❌ エラーが発生しました",
             )
-     

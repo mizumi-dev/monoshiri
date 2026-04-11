@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from concurrent.futures import CancelledError
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,34 @@ def get_embedding_model():
     return _model
 
 
+def _resolve_device() -> str:
+    """
+    使用するデバイスを決定する。
+    設定が "auto" の場合はCUDAの有無を自動判定。
+    """
+    import core.config as _cfg
+    device_pref = getattr(_cfg, "EMBEDDING_DEVICE", "auto")
+
+    if device_pref == "auto":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = "cuda"
+                vram_mb = torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
+                logger.info(f"CUDAが使用可能: GPU={torch.cuda.get_device_name(0)}, VRAM={vram_mb}MB → GPU使用")
+            else:
+                device = "cpu"
+                logger.info("CUDAが使用不可 → CPU使用")
+        except ImportError:
+            device = "cpu"
+            logger.info("torchがインポートできません → CPU使用")
+    else:
+        device = device_pref
+        logger.info(f"デバイス設定: {device}（設定値）")
+
+    return device
+
+
 def _load_model():
     global _last_error
     _last_error = None
@@ -44,12 +73,13 @@ def _load_model():
     )
 
     logger.info("Embeddingモデルを初期化中...")
+    device = _resolve_device()
 
     # ローカルキャッシュが存在する場合は優先使用
     if EMBEDDING_MODEL_DIR.exists() and any(EMBEDDING_MODEL_DIR.iterdir()):
         try:
-            model = SentenceTransformer(str(EMBEDDING_MODEL_DIR))
-            logger.info("ローカルキャッシュからEmbeddingモデルを読み込みました")
+            model = SentenceTransformer(str(EMBEDDING_MODEL_DIR), device=device)
+            logger.info(f"ローカルキャッシュからEmbeddingモデルを読み込みました (device={device})")
             return model
         except Exception as e:
             logger.warning(f"ローカルキャッシュの読み込み失敗（再ダウンロードします）: {e}")
@@ -68,12 +98,12 @@ def _load_model():
                 f"[{attempt}/{DOWNLOAD_MAX_RETRIES}] "
                 f"HuggingFaceから {EMBEDDING_MODEL_ID} をダウンロード中..."
             )
-            model = SentenceTransformer(EMBEDDING_MODEL_ID)
+            model = SentenceTransformer(EMBEDDING_MODEL_ID, device=device)
 
             # ローカルに保存して次回以降はオフラインで動作
             EMBEDDING_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
             model.save(str(EMBEDDING_MODEL_DIR))
-            logger.info(f"Embeddingモデルをローカルに保存しました: {EMBEDDING_MODEL_DIR}")
+            logger.info(f"Embeddingモデルをローカルに保存しました: {EMBEDDING_MODEL_DIR} (device={device})")
 
             # 環境変数を戻す
             if original_endpoint:
@@ -118,24 +148,40 @@ def _load_model():
     raise ConnectionError(_last_error)
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(
+    texts: list[str],
+    cancel_check=None,
+    batch_size: int = 256,
+) -> list[list[float]]:
     """
     テキストリストをEmbeddingベクトルに変換する。
     multilingual-e5-largeは "passage: " プレフィックスを使用（文書側）。
+
+    Args:
+        texts: 変換するテキストリスト
+        cancel_check: キャンセル確認コールバック（呼び出してTrueならCancelledError）
+        batch_size: Embeddingバッチサイズ（大きいほど高速・メモリ使用量増加）
     """
     if not texts:
         return []
 
     model = get_embedding_model()
-    # "passage: " プレフィックスはmultilingual-e5-largeの仕様
     prefixed = [f"passage: {t}" for t in texts]
-    embeddings = model.encode(
-        prefixed,
-        normalize_embeddings=True,
-        show_progress_bar=False,
-        batch_size=32,
-    )
-    return embeddings.tolist()
+
+    # バッチ単位でエンコードしてキャンセルチェックを挟む
+    all_embeddings: list = []
+    for i in range(0, len(prefixed), batch_size):
+        if cancel_check and cancel_check():
+            raise CancelledError("Embeddingがキャンセルされました")
+        batch = prefixed[i:i + batch_size]
+        result = model.encode(
+            batch,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        all_embeddings.extend(result.tolist())
+
+    return all_embeddings
 
 
 def embed_query(query: str) -> list[float]:

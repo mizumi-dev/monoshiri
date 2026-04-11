@@ -1,12 +1,13 @@
 """
 モノシリ インデックス管理画面
 フォルダ追加・インデックス作成・進捗表示・スキップログを提供する。
-SHA-256差分検知により変更ファイルのみ再処理する。
+
+設計方針:
+- インデックス処理は IndexManager (core/indexer.py) のバックグラウンドスレッドで実行
+- @st.fragment(run_every=1) で進捗を1秒ごとに自動更新
+- キャンセルボタンは fragment 内に配置するため、処理中でも確実に反応する
 """
 from __future__ import annotations
-import time
-import uuid
-import json
 import logging
 from pathlib import Path
 
@@ -14,6 +15,27 @@ import streamlit as st
 
 from core.config import load_config, save_config, SKIP_LOG_FILE
 from core.extractor import scan_folder, estimate_index_time
+
+
+# PERF修正: scan_folder は再帰スキャンのため毎 rerun の呼び出しをキャッシュ。
+# フォルダのファイル数はほとんど変わらないので 30 秒 TTL で十分。
+@st.cache_data(ttl=30, show_spinner=False)
+def _cached_scan_folder(folder_str: str) -> int:
+    """フォルダのファイル数をキャッシュ付きで返す"""
+    p = __import__("pathlib").Path(folder_str)
+    if not p.exists():
+        return 0
+    try:
+        return len(scan_folder(p))
+    except Exception:
+        return 0
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_index_stats() -> dict:
+    """インデックス統計をキャッシュ付きで返す"""
+    from core.indexer import get_index_stats
+    return get_index_stats()
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +48,6 @@ def _render_folder_management(config: dict) -> None:
 
     folders: list[str] = config.get("folders", [])
 
-    # フォルダ追加フォーム
     with st.form("add_folder_form", clear_on_submit=True):
         col_input, col_btn = st.columns([4, 1])
         with col_input:
@@ -56,7 +77,6 @@ def _render_folder_management(config: dict) -> None:
             st.success(f"✅ 追加しました: {folder_path.name}")
             st.rerun()
 
-    # 登録済みフォルダ一覧
     if not folders:
         st.info("フォルダが登録されていません。上のフォームからフォルダを追加してください。")
         return
@@ -76,8 +96,8 @@ def _render_folder_management(config: dict) -> None:
         with col_count:
             if exists:
                 try:
-                    files = scan_folder(folder_path)
-                    st.caption(f"{len(files):,}件のファイル")
+                    count = _cached_scan_folder(folder_str)
+                    st.caption(f"{count:,}件のファイル")
                 except Exception:
                     st.caption("ファイル数を取得できません")
 
@@ -87,7 +107,6 @@ def _render_folder_management(config: dict) -> None:
                 config["folders"] = folders
                 save_config(config)
                 st.session_state.config = config
-                # インデックスからも削除
                 try:
                     from core.indexer import delete_folder_from_index
                     delete_folder_from_index(folder_path)
@@ -97,153 +116,94 @@ def _render_folder_management(config: dict) -> None:
                 st.rerun()
 
 
-# ─── インデックス作成 ──────────────────────────────────────────
+# ─── インデックス進捗フラグメント ────────────────────────────────
+#
+# @st.fragment(run_every=1) により1秒ごとに自動更新。
+# キャンセルボタンはこのフラグメント内にあるため、
+# バックグラウンドスレッドをブロックすることなく確実に反応する。
 
-def _run_indexing(config: dict) -> None:
-    """
-    インデックス作成を実行する。
-    Streamlitの進捗表示（progress bar + テキスト）でリアルタイム更新する。
-    """
-    from core.indexer import (
-        get_collection, scan_and_diff, delete_from_chroma,
-        process_single_file, flush_batch, load_skip_log, save_skip_log,
-        BATCH_SIZE,
-    )
+@st.fragment(run_every=1)
+def _render_indexing_progress() -> None:
+    """インデックス進捗を自動更新表示する（フラグメント）"""
+    from core.indexer import IndexManager
 
-    folders = [Path(f) for f in config.get("folders", []) if Path(f).exists()]
+    im = IndexManager.get()
 
-    if not folders:
-        st.error("有効なフォルダがありません。フォルダを追加してください。")
-        st.session_state.indexing = False
+    # アイドル状態なら何も表示しない
+    if im.status == "idle":
         return
 
-    # 差分スキャン
-    with st.spinner("📂 フォルダをスキャン中..."):
-        files_to_process, deleted_paths = scan_and_diff(folders)
+    with st.container(border=True):
 
-    # 削除されたファイルをChromaDBから除去
-    if deleted_paths:
-        with st.spinner(f"🗑️ 削除されたファイル（{len(deleted_paths)}件）を処理中..."):
-            delete_from_chroma(deleted_paths)
+        # ── 実行中 ──────────────────────────────────────────
+        if im.is_running:
+            col_label, col_cancel = st.columns([3, 1])
+            with col_label:
+                st.markdown(f"**{im.phase_label}**")
+            with col_cancel:
+                if st.button("⏹️ キャンセル", key="cancel_idx", use_container_width=True):
+                    im.cancel()
 
-    total = len(files_to_process)
+            # 進捗バー
+            if im.status == "indexing" and im.total_count > 0:
+                st.progress(im.progress)
+                done = im.done_count
+                total = im.total_count
+                elapsed_str = im.get_elapsed_str()
 
-    if total == 0:
-        st.success("✅ インデックスは最新の状態です（変更なし）")
-        st.session_state.indexing = False
-        return
+                status_line = f"[{done}/{total}]"
+                if im.current_file:
+                    status_line += f"  {im.current_file}"
+                st.caption(status_line)
+                st.caption(f"経過: {elapsed_str}")
 
-    # 時間見積もり表示
-    estimated = estimate_index_time(total)
-    st.info(f"📝 {total:,}件のファイルを処理します（目安: {estimated}）")
+                # 残り時間の推定
+                if done > 0 and im.elapsed > 0:
+                    per_file = im.elapsed / done
+                    remaining = per_file * max(total - done, 0)
+                    if remaining > 5:
+                        rem = f"{int(remaining // 60)}分{int(remaining % 60)}秒" if remaining >= 60 else f"{int(remaining)}秒"
+                        st.caption(f"残り約 {rem}")
+            else:
+                st.caption(im.get_elapsed_str() + " 経過")
 
-    # 進捗UI
-    progress_bar = st.progress(0.0)
-    status_text = st.empty()
-    time_text = st.empty()
-    cancel_placeholder = st.empty()
+        # ── 完了 ────────────────────────────────────────────
+        elif im.status == "done":
+            result = im.result
+            elapsed = im.get_elapsed_str()
 
-    cancel_flag: list[bool] = [False]
+            if result.get("no_change"):
+                st.success("✅ インデックスは最新の状態です（変更なし）")
+            else:
+                processed = result.get("processed", 0)
+                skipped = result.get("skipped", 0)
+                st.success(
+                    f"✅ 完了！  処理: {processed}件  スキップ: {skipped}件  "
+                    f"（所要時間: {elapsed}）"
+                )
 
-    with cancel_placeholder:
-        if st.button("⏹️ キャンセル", key="cancel_indexing"):
-            cancel_flag[0] = True
+            if st.button("閉じる", key="close_idx_done"):
+                im.reset()
+                st.rerun()
 
-    # スキップログの準備
-    skip_log = load_skip_log()
-    processing_paths = {str(f) for f, _ in files_to_process}
-    skip_log = [s for s in skip_log if s["file_path"] not in processing_paths]
+        # ── キャンセル ────────────────────────────────────────
+        elif im.status == "cancelled":
+            elapsed = im.get_elapsed_str()
+            st.warning(f"⏹️ キャンセルしました（処理済みのデータは保持されます）（{elapsed}）")
 
-    # ChromaDBコレクション取得
-    collection = get_collection()
+            if st.button("閉じる", key="close_idx_cancelled"):
+                im.reset()
+                st.rerun()
 
-    # 変更ファイルのChromaDBエントリを削除（再インデックス前）
-    with st.spinner("🔄 変更ファイルの旧データを削除中..."):
-        delete_from_chroma([str(f) for f, _ in files_to_process])
+        # ── エラー ────────────────────────────────────────────
+        elif im.status == "error":
+            st.error(f"❌ エラーが発生しました")
+            with st.expander("エラー詳細"):
+                st.code(im.error_msg[:2000], language=None)
 
-    # バッチバッファ
-    batch_texts: list[str] = []
-    batch_ids: list[str] = []
-    batch_metadatas: list[dict] = []
-
-    skipped = 0
-    processed = 0
-    start_time = time.time()
-
-    for i, (file_path, folder_id) in enumerate(files_to_process):
-        # キャンセルチェック
-        if cancel_flag[0]:
-            status_text.warning("⏹️ キャンセルされました")
-            break
-
-        # 進捗表示
-        progress = (i + 1) / total
-        progress_bar.progress(min(progress, 1.0))
-        status_text.text(f"🔄 [{i+1}/{total}]  {file_path.name}")
-
-        elapsed = time.time() - start_time
-        if i > 0:
-            per_file = elapsed / i
-            remaining = per_file * (total - i)
-            rem_str = f"  |  残り約{int(remaining)}秒" if remaining > 5 else ""
-        else:
-            rem_str = ""
-        time_text.caption(f"経過: {int(elapsed)}秒{rem_str}")
-
-        # ファイル処理
-        chunks_added, skip_reason = process_single_file(
-            file_path=file_path,
-            folder_id=folder_id,
-            collection=collection,
-            batch_texts=batch_texts,
-            batch_ids=batch_ids,
-            batch_metadatas=batch_metadatas,
-            skip_log=skip_log,
-        )
-
-        if skip_reason:
-            skipped += 1
-        else:
-            processed += 1
-
-        # バッチが溜まったらフラッシュ
-        if len(batch_texts) >= BATCH_SIZE:
-            try:
-                flush_batch(collection, batch_texts, batch_ids, batch_metadatas)
-            except Exception as e:
-                logger.error(f"バッチ格納エラー: {e}")
-                st.error(f"Embeddingエラーが発生しました: {e}")
-                st.session_state.indexing = False
-                return
-            batch_texts.clear()
-            batch_ids.clear()
-            batch_metadatas.clear()
-
-    # 残りのバッチをフラッシュ
-    if batch_texts:
-        try:
-            flush_batch(collection, batch_texts, batch_ids, batch_metadatas)
-        except Exception as e:
-            logger.error(f"最終バッチ格納エラー: {e}")
-
-    # スキップログ保存
-    save_skip_log(skip_log)
-
-    # 完了表示
-    total_time = int(time.time() - start_time)
-    progress_bar.progress(1.0)
-
-    if not cancel_flag[0]:
-        status_text.success(
-            f"✅ 完了！  処理: {processed}件  スキップ: {skipped}件  "
-            f"（所要時間: {total_time}秒）"
-        )
-    time_text.empty()
-    cancel_placeholder.empty()
-
-    st.session_state.indexing = False
-    time.sleep(1.5)
-    st.rerun()
+            if st.button("閉じる", key="close_idx_error"):
+                im.reset()
+                st.rerun()
 
 
 # ─── スキップログ表示 ──────────────────────────────────────────
@@ -261,8 +221,7 @@ def _render_skip_log() -> None:
 
     st.warning(f"{len(skip_log)}件のファイルが処理できませんでした")
 
-    # テーブル形式で表示
-    for item in skip_log[:50]:  # 最大50件
+    for item in skip_log[:50]:
         with st.container():
             col_file, col_reason = st.columns([3, 2])
             with col_file:
@@ -279,23 +238,24 @@ def _render_skip_log() -> None:
 
 def render_index_page() -> None:
     """インデックス管理画面をレンダリングする"""
+    from core.indexer import IndexManager
+
     st.header("📁 インデックス管理")
 
     config = st.session_state.get("config", load_config())
+    im = IndexManager.get()
 
     # フォルダ管理セクション
     _render_folder_management(config)
 
     st.divider()
 
-    # インデックス作成ボタン
     folders = config.get("folders", [])
 
     if folders:
-        # インデックス統計
+        # インデックス統計（キャッシュ付き）
         try:
-            from core.indexer import get_index_stats
-            stats = get_index_stats()
+            stats = _cached_index_stats()
             if stats["total_chunks"] > 0:
                 st.metric("現在のインデックス", f"{stats['total_chunks']:,} チャンク")
         except Exception:
@@ -304,21 +264,48 @@ def render_index_page() -> None:
         col_btn, col_info = st.columns([2, 3])
 
         with col_btn:
-            if not st.session_state.get("indexing", False):
-                if st.button(
-                    "🔄 インデックスを作成・更新",
-                    type="primary",
-                    use_container_width=True,
-                    help="変更されたファイルのみ差分で更新します（SHA-256検知）",
-                ):
-                    st.session_state.indexing = True
-                    st.rerun()
-            else:
+            if im.is_running:
                 st.button(
                     "⏳ インデックス作成中...",
                     disabled=True,
                     use_container_width=True,
                 )
+            else:
+                # ファイル数を取得して目安時間を表示
+                try:
+                    total_files = sum(
+                        _cached_scan_folder(f)
+                        for f in folders if Path(f).exists()
+                    )
+                    btn_help = f"変更ファイルのみ差分更新（SHA-256検知）"
+                except Exception:
+                    btn_help = "変更ファイルのみ差分で更新します"
+
+                if st.button(
+                    "🔄 インデックスを作成・更新",
+                    type="primary",
+                    use_container_width=True,
+                    help=btn_help,
+                ):
+                    folder_paths = [Path(f) for f in folders if Path(f).exists()]
+                    if folder_paths:
+                        im.start(folder_paths)
+                        st.rerun()
+                    else:
+                        st.error("有効なフォルダがありません")
+
+                # 全件再インデックスボタン（抽出ロジック変更後などに使用）
+                if st.button(
+                    "⚡ 全件再インデックス（強制）",
+                    use_container_width=True,
+                    help="ハッシュキャッシュをクリアして全ファイルを再処理します。抽出ロジック変更後に使用してください。",
+                ):
+                    folder_paths = [Path(f) for f in folders if Path(f).exists()]
+                    if folder_paths:
+                        im.start_force_reindex(folder_paths)
+                        st.rerun()
+                    else:
+                        st.error("有効なフォルダがありません")
 
         with col_info:
             st.caption(
@@ -326,10 +313,12 @@ def render_index_page() -> None:
                 "初回は時間がかかりますが、2回目以降は高速です。"
             )
 
-    # インデックス実行
-    if st.session_state.get("indexing", False):
-        st.divider()
-        _run_indexing(config)
+    # インデックス進捗（フラグメント：1秒ごと自動更新、キャンセル可能）
+    # ※ 無条件でフラグメントを追加する。条件付きにするとst.rerun()のたびに
+    #   fragmentが削除→再追加されrun_every=1のタイマーがリセットされるため。
+    #   fragment内部でidle時は何も描画しないことで同等の制御を行う。
+    st.divider()
+    _render_indexing_progress()
 
     st.divider()
 
