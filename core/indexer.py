@@ -20,9 +20,9 @@ from pathlib import Path
 from typing import Optional
 
 from core.config import (
-    CHROMA_DIR, CHROMA_COLLECTION,
     CHUNK_SIZE, CHUNK_OVERLAP, SKIP_LOG_FILE,
 )
+from core.chromadb_store import get_chroma_client, get_collection, get_index_stats
 from core.extractor import extract_text, scan_folder
 from core.hash_manager import (
     compute_hash, get_diff, load_hashes, save_hashes,
@@ -43,32 +43,6 @@ PRODUCER_QUEUE_SIZE = 30
 
 # _SENTINEL: Producerがキュー終端を伝えるシグナル
 _SENTINEL = None
-
-
-# ─── ChromaDB ──────────────────────────────────────────────
-
-def get_chroma_client():
-    """ChromaDBクライアントを取得する"""
-    import chromadb
-    return chromadb.PersistentClient(path=str(CHROMA_DIR))
-
-
-def get_collection():
-    """ChromaDBコレクションを取得または作成する"""
-    client = get_chroma_client()
-    return client.get_or_create_collection(
-        name=CHROMA_COLLECTION,
-        metadata={"hnsw:space": "cosine"},
-    )
-
-
-def get_index_stats() -> dict:
-    """インデックスの統計情報を返す"""
-    try:
-        collection = get_collection()
-        return {"total_chunks": collection.count()}
-    except Exception:
-        return {"total_chunks": 0}
 
 
 # ─── テキスト分割 ────────────────────────────────────────────

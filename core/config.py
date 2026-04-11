@@ -27,10 +27,11 @@ HISTORY_FILE      = DATA_DIR / "history.json"
 CONFIG_FILE       = DATA_DIR / "config.json"
 SKIP_LOG_FILE     = LOGS_DIR / "skip_log.txt"   # v3.4: logs/skip_log.txt
 HASH_MANIFEST_FILE = CACHE_DIR / ".hash_manifest"  # v3.4: cache/.hash_manifest（単一ファイル）
+HASH_DIR          = CACHE_DIR / "hashes"          # フォルダ別ハッシュファイルの格納ディレクトリ
 USAGE_FILE        = DATA_DIR / "usage.json"      # Free層使用量トラッキング
 
 # 初回起動時にディレクトリを作成
-for _d in [DATA_DIR, CHROMA_DIR, CACHE_DIR, LOGS_DIR, MODELS_DIR]:
+for _d in [DATA_DIR, CHROMA_DIR, CACHE_DIR, LOGS_DIR, MODELS_DIR, HASH_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # Embeddingモデル設定（常時ローカル・外部送信なし）
