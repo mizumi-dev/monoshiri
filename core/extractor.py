@@ -92,7 +92,13 @@ def extract_text(file_path: Path) -> tuple[list[dict], str | None]:
 
 
 def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
-    """PyMuPDFを使いページごとにテキスト抽出"""
+    """PyMuPDFを使いページごとにテキスト抽出
+
+    BUG-027修正: get_text("text") → get_text("blocks") + 座標ソート
+    財務PDFの表構造（年度×指標）を保持するため、テキストブロックをY座標→X座標順に
+    ソートし直す。これにより列単位での誤抽出を防ぎ、行単位の自然読み順を保持する。
+    round(b[1] / 10) でY座標を10px単位に丸め、同一行の左右ブロックをX座標で並べる。
+    """
     import fitz  # PyMuPDF
 
     page_chunks = []
@@ -100,7 +106,14 @@ def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
     try:
         for page_num in range(len(doc)):
             page = doc[page_num]
-            text = page.get_text("text").strip()
+            # blocks = [(x0, y0, x1, y1, text, block_no, block_type), ...]
+            blocks = page.get_text("blocks")
+            # テキストブロック(block_type==0)のみ、Y→X座標順でソート
+            text_blocks = sorted(
+                [b for b in blocks if b[6] == 0],
+                key=lambda b: (round(b[1] / 10), b[0])  # 行単位(10px)でY→X
+            )
+            text = "\n".join(b[4].strip() for b in text_blocks if b[4].strip())
             if text:
                 page_chunks.append({
                     "text": text,
@@ -114,25 +127,78 @@ def _extract_pdf(file_path: Path) -> tuple[list[dict], None]:
 
 
 def _extract_docx(file_path: Path) -> tuple[list[dict], None]:
-    """python-docxを使い全文テキスト抽出"""
+    """python-docxを使い全文テキスト抽出
+
+    CHUNK-002修正: セクションヘッダーを各テキスト行にプレフィックスとして付与。
+    Heading スタイルを検出して current_heading を更新し、後続の段落・テーブル行に
+    「[見出し]」プレフィックスを付ける。チャンク分割後も「どのセクションか」が保持される。
+    テーブルは行単位で「セル1 | セル2 | ...」形式に変換し、行の意味関係を保持する。
+    結合セルの重複はXML要素IDで検出して排除する。
+    """
     from docx import Document
 
     doc = Document(str(file_path))
     texts: list[str] = []
+    current_heading: str = ""
 
-    # 段落テキスト
+    # 段落テキスト（見出し検出付き）
     for para in doc.paragraphs:
         stripped = para.text.strip()
-        if stripped:
-            texts.append(stripped)
+        if not stripped:
+            continue
 
-    # テーブルセル
+        style_name = para.style.name if para.style else ""
+        is_heading = (
+            style_name.startswith("Heading")
+            or "見出し" in style_name
+            or style_name.lower().startswith("heading")
+        )
+
+        if is_heading:
+            current_heading = stripped
+            texts.append(stripped)
+        else:
+            if current_heading:
+                texts.append(f"[{current_heading}] {stripped}")
+            else:
+                texts.append(stripped)
+
+    # テーブル（行単位で構造化・見出しコンテキスト付与）
     for table in doc.tables:
-        for row in table.rows:
+        header_cells: list[str] = []
+        for row_idx, row in enumerate(table.rows):
+            # 結合セルの重複をXML要素IDで排除
+            seen: set[int] = set()
+            row_cells: list[str] = []
             for cell in row.cells:
-                stripped = cell.text.strip()
-                if stripped:
-                    texts.append(stripped)
+                cell_id = id(cell._tc)
+                if cell_id not in seen:
+                    seen.add(cell_id)
+                    row_cells.append(cell.text.strip())
+
+            non_empty = [c for c in row_cells if c]
+            if not non_empty:
+                continue
+
+            if row_idx == 0:
+                # 最初の行をヘッダー候補として記録
+                header_cells = row_cells
+                row_line = " | ".join(non_empty)
+            else:
+                # ヘッダーと値を対応付けて「ヘッダー: 値」形式で出力
+                if header_cells:
+                    parts: list[str] = []
+                    for header, value in zip(header_cells, row_cells):
+                        if value:
+                            parts.append(f"{header}: {value}" if header else value)
+                    row_line = " | ".join(parts) if parts else " | ".join(non_empty)
+                else:
+                    row_line = " | ".join(non_empty)
+
+            if current_heading:
+                texts.append(f"[{current_heading}] {row_line}")
+            else:
+                texts.append(row_line)
 
     full_text = "\n".join(texts)
     if not full_text:
@@ -178,26 +244,62 @@ def _extract_pptx(file_path: Path) -> tuple[list[dict], None]:
 
 
 def _extract_xlsx(file_path: Path) -> tuple[list[dict], None]:
-    """openpyxlを使いセルテキストのみ抽出（グラフ・画像はスキップ）"""
+    """openpyxlを使い行列関係を保持してテキスト抽出
+
+    CHUNK-003修正: 最初の非空行をヘッダーとして読み取り、以降のデータ行を
+    「ヘッダー: 値 | ヘッダー: 値 ...」形式で出力する。
+    シート名をプレフィックスとして付与することで、チャンク後も列の意味が保持される。
+    例: [損益計算書] 売上高: 7,623,374 | 営業利益: 523,812
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(str(file_path), data_only=True, read_only=True)
-    texts: list[str] = []
+    all_texts: list[str] = []
 
     for sheet in wb.worksheets:
-        for row in sheet.iter_rows():
-            for cell in row:
-                if cell.value is not None:
-                    val = str(cell.value).strip()
-                    if val and val.lower() != "none":
-                        texts.append(val)
+        sheet_name: str = sheet.title or ""
+        prefix: str = f"[{sheet_name}] " if sheet_name else ""
+        header_row: list[str] = []
+        sheet_texts: list[str] = []
+
+        for row in sheet.iter_rows(values_only=True):
+            # None → 空文字列に統一
+            cell_values = [
+                str(c).strip() if (c is not None and str(c).strip().lower() != "none") else ""
+                for c in row
+            ]
+
+            # 全空行はスキップ
+            if not any(cell_values):
+                continue
+
+            if not header_row:
+                # 最初の非空行をヘッダー候補に
+                header_row = cell_values
+                header_line = " | ".join(v for v in header_row if v)
+                if header_line:
+                    sheet_texts.append(f"{prefix}{header_line}")
+            else:
+                # データ行: ヘッダーと対応付けて「ヘッダー: 値」形式で出力
+                parts: list[str] = []
+                for i, value in enumerate(cell_values):
+                    if not value:
+                        continue
+                    if i < len(header_row) and header_row[i]:
+                        parts.append(f"{header_row[i]}: {value}")
+                    else:
+                        parts.append(value)
+                if parts:
+                    sheet_texts.append(f"{prefix}" + " | ".join(parts))
+
+        all_texts.extend(sheet_texts)
 
     wb.close()
 
-    if not texts:
+    if not all_texts:
         return [], None
 
-    return [{"text": "\n".join(texts), "page": None, "slide": None}], None
+    return [{"text": "\n".join(all_texts), "page": None, "slide": None}], None
 
 
 def _extract_text_file(file_path: Path) -> tuple[list[dict], str | None]:

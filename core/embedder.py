@@ -118,13 +118,21 @@ def _load_model():
     raise ConnectionError(_last_error)
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str], cancel_check=None) -> list[list[float]]:
     """
     テキストリストをEmbeddingベクトルに変換する。
     multilingual-e5-largeは "passage: " プレフィックスを使用（文書側）。
+
+    Args:
+        texts: Embeddingするテキストのリスト
+        cancel_check: キャンセル確認関数 () -> bool。Trueを返したらCancelledErrorを送出する。
     """
     if not texts:
         return []
+
+    if cancel_check and cancel_check():
+        from concurrent.futures import CancelledError
+        raise CancelledError()
 
     model = get_embedding_model()
     # "passage: " プレフィックスはmultilingual-e5-largeの仕様
