@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 from core.config import TOP_K, MAX_EVIDENCE, RAG_CONTEXT_MAX_LENGTH
+from core.chromadb_store import get_collection
 from core.embedder import embed_query
 from core.indexer import get_collection
 from core.llm import generate_answer, stream_answer

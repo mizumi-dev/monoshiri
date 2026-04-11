@@ -165,6 +165,10 @@ def embed_texts(
     if not texts:
         return []
 
+    if cancel_check and cancel_check():
+        from concurrent.futures import CancelledError
+        raise CancelledError()
+
     model = get_embedding_model()
     prefixed = [f"passage: {t}" for t in texts]
 

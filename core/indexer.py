@@ -20,9 +20,9 @@ from pathlib import Path
 from typing import Optional
 
 from core.config import (
-    CHROMA_DIR, CHROMA_COLLECTION,
     CHUNK_SIZE, CHUNK_OVERLAP, SKIP_LOG_FILE,
 )
+from core.chromadb_store import get_chroma_client, get_collection, get_index_stats
 from core.extractor import extract_text, scan_folder
 from core.hash_manager import (
     compute_hash, get_diff, load_hashes, save_hashes,
