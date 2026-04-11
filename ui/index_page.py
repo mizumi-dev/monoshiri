@@ -100,11 +100,11 @@ def _render_folder_management(config: dict) -> None:
 
 # ─── インデックス進捗表示（自動リフレッシュ） ─────────────────
 
-@st.fragment(run_every=1)
+@st.fragment(run_every=2)
 def _render_indexing_progress() -> None:
     """
     IndexManagerの進捗をリアルタイム表示する。
-    1秒ごとに自動リフレッシュして進捗バーを更新する。
+    2秒ごとに自動リフレッシュして進捗バーを更新する（1秒だと白い点滅が頻発するため2秒に設定）。
     settings_page.py の _render_download_queue と同じパターン。
     """
     from core.indexer import IndexManager
@@ -123,7 +123,7 @@ def _render_indexing_progress() -> None:
             f"[{mgr.done_count}/{mgr.total_count}]  {mgr.current_file}"
             f"  |  経過: {mgr.get_elapsed_str()}"
         )
-    elif mgr.status in ("scanning", "deleting"):
+    elif mgr.status in ("loading_model", "scanning", "deleting"):
         st.caption(f"経過: {mgr.get_elapsed_str()}")
 
     # キャンセルボタン（処理中のみ）

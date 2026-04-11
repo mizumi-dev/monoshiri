@@ -485,6 +485,17 @@ class IndexManager:
     def _run(self, folders: list[Path]) -> None:
         """インデックス処理のメインロジック（バックグラウンドスレッドで実行）"""
         try:
+            # ── Embeddingモデルの事前ロード ──
+            # flush()の中で初回ロードが起きると進捗バーが長時間止まる。
+            # インデックス開始時に明示的にロードして「準備中」を表示する。
+            self._update(status="loading_model", phase_label="🤖 Embeddingモデルを準備中（初回のみ時間がかかります）...")
+            from core.embedder import get_embedding_model
+            get_embedding_model()  # キャッシュ済みなら瞬時に完了
+
+            if self._cancel_event.is_set():
+                self._update(status="cancelled", phase_label="キャンセルしました")
+                return
+
             # ── スキャン & 差分検出 ──
             self._update(status="scanning", phase_label="📂 フォルダをスキャン中...")
             files_to_process, deleted_paths = scan_and_diff(folders)
