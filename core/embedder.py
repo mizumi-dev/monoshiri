@@ -46,17 +46,42 @@ class AdaptiveBatchSizeManager:
                    f"初期BATCH_SIZE: {self.current_batch_size}")
 
     def _get_vram_info(self) -> tuple[int, int]:
-        """VRAM総容量と空き容量をMB単位で返す"""
+        """VRAM総容量と空き容量をMB単位で返す（CUDA / DirectML 対応）"""
+        # CUDA 経由
         try:
             import torch
             if torch.cuda.is_available():
                 total = torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
                 allocated = torch.cuda.memory_allocated(0) // (1024 ** 2)
-                # 予約済みメモリを除いた実質的な空き
                 free = total - allocated
-                return total, max(free, 512)  # 最低512MBは確保
+                return total, max(free, 512)
         except ImportError:
             pass
+
+        # DirectML 経由（Windows の DX12 対応 GPU）
+        # torch_directml には VRAM 直接取得 API がないため、
+        # WMI で GPU アダプターから取得する
+        try:
+            import torch_directml
+            if torch_directml.is_available():
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ["wmic", "path", "win32_VideoController", "get", "AdapterRAM"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip().isdigit()]
+                    if lines:
+                        total_bytes = max(int(x) for x in lines)
+                        total = total_bytes // (1024 ** 2)
+                        return total, max(total // 2, 512)  # 空き容量は不明なので総容量の半分と仮定
+                except Exception:
+                    pass
+                # WMI 失敗時は控えめなデフォルト
+                return 4096, 2048
+        except ImportError:
+            pass
+
         return 0, 0
 
     def _calculate_optimal_batch_size(self) -> int:
@@ -170,32 +195,75 @@ def get_embedding_model():
     return _model
 
 
-def _resolve_device() -> str:
+def detect_backend() -> tuple[str, str]:
+    """
+    使用可能な高速化バックエンドを検出する。
+    戻り値: (device, backend_name)
+      device: torch に渡す device 識別子（"cuda" / dml_device / "mps" / "cpu"）
+      backend_name: ユーザー向け表示用（"CUDA" / "DirectML" / "MPS" / "CPU"）
+
+    優先順位: CUDA（NVIDIA最速）> DirectML（NVIDIA/AMD/Intel 全GPU）> MPS（Apple Silicon）> CPU
+    """
+    # 1. NVIDIA CUDA（最高性能）
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda", "CUDA"
+    except ImportError:
+        pass
+
+    # 2. DirectML（Windows の NVIDIA/AMD/Intel すべての DX12 対応 GPU）
+    try:
+        import torch_directml
+        if torch_directml.is_available():
+            # torch_directml.device() は torch.device オブジェクトを返す
+            return torch_directml.device(), "DirectML"
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"DirectML 初期化失敗: {e}")
+
+    # 3. Apple Silicon (MPS)
+    try:
+        import torch
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps", "MPS"
+    except ImportError:
+        pass
+
+    return "cpu", "CPU"
+
+
+def _resolve_device():
     """
     使用するデバイスを決定する。
-    設定が "auto" の場合はCUDAの有無を自動判定。
+    設定が "auto" の場合は CUDA > DirectML > MPS > CPU の順で自動判定。
     """
     import core.config as _cfg
     device_pref = getattr(_cfg, "EMBEDDING_DEVICE", "auto")
 
     if device_pref == "auto":
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
+        device, backend = detect_backend()
+        if backend == "CUDA":
+            try:
+                import torch
                 vram_mb = torch.cuda.get_device_properties(0).total_memory // (1024 ** 2)
-                logger.info(f"CUDAが使用可能: GPU={torch.cuda.get_device_name(0)}, VRAM={vram_mb}MB → GPU使用")
-            else:
-                device = "cpu"
-                logger.info("CUDAが使用不可 → CPU使用")
-        except ImportError:
-            device = "cpu"
-            logger.info("torchがインポートできません → CPU使用")
+                logger.info(
+                    f"CUDAが使用可能: GPU={torch.cuda.get_device_name(0)}, "
+                    f"VRAM={vram_mb}MB → GPU使用"
+                )
+            except Exception:
+                logger.info("CUDA 使用")
+        elif backend == "DirectML":
+            logger.info("DirectML が使用可能 → GPU使用（NVIDIA/AMD/Intel 汎用）")
+        elif backend == "MPS":
+            logger.info("Apple MPS が使用可能 → GPU使用")
+        else:
+            logger.info("GPUバックエンドが見つかりません → CPU使用")
+        return device
     else:
-        device = device_pref
-        logger.info(f"デバイス設定: {device}（設定値）")
-
-    return device
+        logger.info(f"デバイス設定: {device_pref}（設定値）")
+        return device_pref
 
 
 def _load_model():
@@ -302,8 +370,7 @@ def embed_texts(
         return []
 
     if cancel_check and cancel_check():
-        from concurrent.futures import CancelledError
-        raise CancelledError()
+        raise CancelledError("Embeddingがキャンセルされました")
 
     # VRAM自動調整: batch_sizeが未指定なら最適値を取得
     if batch_size is None:

@@ -22,7 +22,7 @@ if errorlevel 1 (
 for /f "delims=" %%i in ('python -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%i"
 echo [OK] Python: !PYTHON_EXE!
 
-python -c "import streamlit" >nul 2>&1
+python -c "import PyQt6" >nul 2>&1
 if errorlevel 1 (
     echo [SETUP] Installing required packages...
     pip install -r requirements.txt
@@ -35,11 +35,10 @@ if errorlevel 1 (
 
 if not exist "%~dp0logs" mkdir "%~dp0logs"
 
-rem --- If Monoshiri is already running, just open browser ---
-powershell -NoProfile -Command "$c = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue; if ($c) { exit 0 } else { exit 1 }" >nul 2>&1
+rem --- If Monoshiri is already running, skip re-launch ---
+tasklist /FI "WINDOWTITLE eq モノシリ*" 2>nul | find /I "python.exe" >nul 2>&1
 if !errorlevel! equ 0 (
     echo [OK] Monoshiri is already running.
-    start "" "http://localhost:8501"
     exit /b 0
 )
 
@@ -89,32 +88,11 @@ if !OLLAMA_WAIT! lss 15 goto :ollama_wait_loop
 
 echo [WARN] Ollama did not respond within 15 seconds. Continuing anyway...
 
-rem --- Start Monoshiri ---
+rem --- Start Monoshiri (PyQt6 native window) ---
 :start_monoshiri
 echo [INFO] Starting Monoshiri...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -WorkingDirectory '%~dp0' -WindowStyle Hidden -FilePath '%PYTHON_EXE%' -ArgumentList '-m','streamlit','run','app.py','--server.port','8501','--server.headless','true','--browser.gatherUsageStats','false'" >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Failed to start Monoshiri.
-    pause
-    exit /b 1
-)
-
-set "MONO_WAIT=0"
-:mono_wait_loop
-timeout /t 1 /nobreak >nul
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8501' -TimeoutSec 2 -UseBasicParsing | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
-if !errorlevel! equ 0 goto :mono_ready
-set /a MONO_WAIT+=1
-if !MONO_WAIT! lss 20 goto :mono_wait_loop
-
-echo [ERROR] Monoshiri did not become ready in time.
-pause
-exit /b 1
-
-:mono_ready
-echo [OK] Monoshiri is running.
-echo      URL: http://localhost:8501
-echo      Stop: stop.bat
-start "" "http://localhost:8501"
+start "" /D "%~dp0" "%PYTHON_EXE%" app_qt.py
+echo [OK] Monoshiri window launched.
+echo      To stop: close the Monoshiri window.
 timeout /t 2 /nobreak >nul
 exit /b 0

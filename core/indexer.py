@@ -23,6 +23,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import CancelledError, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import wait as futures_wait
 from pathlib import Path
 from typing import Optional
 
@@ -330,6 +331,85 @@ def run_indexing_pipeline(
         except Exception:
             return "medium"  # 不明な場合は中サイズ扱い
 
+    def _kill_pool(pool: ProcessPoolExecutor) -> None:
+        """プールの全プロセスを即座に強制終了する"""
+        try:
+            for proc in list(pool._processes.values()):
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+    def _process_batch(files: list[tuple[Path, str]], workers: int, label: str) -> bool:
+        """
+        ファイルを ProcessPoolExecutor で並列抽出する。
+        戻り値: キャンセルされた場合 True、正常完了は False
+
+        キャンセル即時反応のため、別スレッドで watchdog を起動し
+        cancel_event.set() 検出と同時にプール全体を terminate する。
+        """
+        if not files:
+            return False
+        logger.info(f"{label}ファイル処理開始: {len(files)}ファイル（並列度: {workers}）")
+        pool = ProcessPoolExecutor(max_workers=workers)
+
+        # ── キャンセル監視 watchdog ─────────────────────────
+        stop_watchdog = threading.Event()
+
+        def _watchdog():
+            # cancel_event か処理完了まで待機
+            while not stop_watchdog.is_set():
+                if cancel_event.wait(timeout=0.2):
+                    logger.info(f"[Cancel] {label}: キャンセル検出 → プール強制終了")
+                    _kill_pool(pool)
+                    return
+                if stop_watchdog.wait(timeout=0.05):
+                    return
+
+        watchdog_thread = threading.Thread(
+            target=_watchdog, daemon=True, name=f"watchdog-{label}"
+        )
+        watchdog_thread.start()
+
+        cancelled = False
+        try:
+            futures = {
+                pool.submit(extract_file_chunks, fp, fid): (fp, fid)
+                for fp, fid in files
+            }
+            pending = set(futures.keys())
+            # 短いタイムアウトで poll することでキャンセル反映を高速化
+            while pending:
+                if cancel_event.is_set():
+                    cancelled = True
+                    break
+                done, pending = futures_wait(
+                    pending, timeout=0.3, return_when="FIRST_COMPLETED"
+                )
+                for future in done:
+                    if cancel_event.is_set():
+                        cancelled = True
+                        break
+                    fp, fid = futures[future]
+                    try:
+                        result = future.result()
+                        logger.info(f"抽出完了[{label}]: {fp.name}")
+                        chunk_queue.put((fp, fid, result))
+                    except Exception as e:
+                        logger.error(f"抽出エラー[{label}] {fp}: {e}")
+                        chunk_queue.put((fp, fid, ([], [], str(e))))
+                if cancelled:
+                    break
+        finally:
+            stop_watchdog.set()
+            _kill_pool(pool)
+            watchdog_thread.join(timeout=1)
+
+        return cancelled
+
     def producer():
         # ファイルをサイズで分類
         small_files = [(fp, fid) for fp, fid in files_to_process if _get_file_size_category(fp) == "small"]
@@ -338,101 +418,15 @@ def run_indexing_pipeline(
 
         logger.info(f"ファイル分類: 小={len(small_files)}, 中={len(medium_files)}, 大={len(large_files)}")
 
-        # 小ファイル: 高並列（ProcessPoolExecutorでGIL回避）
-        if small_files:
-            logger.info(f"小ファイル処理開始: {len(small_files)}ファイル（並列度: {_MAX_WORKERS}）")
-            pool = ProcessPoolExecutor(max_workers=_MAX_WORKERS)
-            try:
-                futures = {pool.submit(extract_file_chunks, fp, fid): (fp, fid) for fp, fid in small_files}
-                for future in as_completed(futures):
-                    if cancel_event.is_set():
-                        logger.info("[Cancel] キャンセル検出、プロセスプールを強制終了します")
-                        # 全プロセスを強制終了
-                        for proc in pool._processes.values():
-                            try:
-                                proc.terminate()
-                                proc.join(timeout=1)
-                                if proc.is_alive():
-                                    proc.kill()
-                            except Exception:
-                                pass
-                        pool.shutdown(wait=False, cancel_futures=True)
-                        chunk_queue.put(_SENTINEL)
-                        return
-                    fp, fid = futures[future]
-                    try:
-                        result = future.result()
-                        logger.info(f"抽出完了[小]: {fp.name}")
-                        chunk_queue.put((fp, fid, result))
-                    except Exception as e:
-                        logger.error(f"抽出エラー[小] {fp}: {e}")
-                        chunk_queue.put((fp, fid, ([], [], str(e))))
-            finally:
-                pool.shutdown(wait=False, cancel_futures=True)
-
-        # 中ファイル: 適度な並列（ProcessPoolExecutorでGIL回避）
-        if medium_files:
-            logger.info(f"中ファイル処理開始: {len(medium_files)}ファイル（並列度: {max(2, _MAX_WORKERS // 2)}）")
-            pool = ProcessPoolExecutor(max_workers=max(2, _MAX_WORKERS // 2))
-            try:
-                futures = {pool.submit(extract_file_chunks, fp, fid): (fp, fid) for fp, fid in medium_files}
-                for future in as_completed(futures):
-                    if cancel_event.is_set():
-                        logger.info("[Cancel] キャンセル検出、プロセスプールを強制終了します")
-                        for proc in pool._processes.values():
-                            try:
-                                proc.terminate()
-                                proc.join(timeout=1)
-                                if proc.is_alive():
-                                    proc.kill()
-                            except Exception:
-                                pass
-                        pool.shutdown(wait=False, cancel_futures=True)
-                        chunk_queue.put(_SENTINEL)
-                        return
-                    fp, fid = futures[future]
-                    try:
-                        result = future.result()
-                        logger.info(f"抽出完了[中]: {fp.name}")
-                        chunk_queue.put((fp, fid, result))
-                    except Exception as e:
-                        logger.error(f"抽出エラー[中] {fp}: {e}")
-                        chunk_queue.put((fp, fid, ([], [], str(e))))
-            finally:
-                pool.shutdown(wait=False, cancel_futures=True)
-
-        # 大ファイル: 低並列（ProcessPoolExecutorで2 workers、メモリ保護）
-        if large_files:
-            logger.info(f"大ファイル処理開始: {len(large_files)}ファイル（並列度: 2）")
-            pool = ProcessPoolExecutor(max_workers=2)
-            try:
-                futures = {pool.submit(extract_file_chunks, fp, fid): (fp, fid) for fp, fid in large_files}
-                for future in as_completed(futures):
-                    if cancel_event.is_set():
-                        logger.info("[Cancel] キャンセル検出、プロセスプールを強制終了します")
-                        for proc in pool._processes.values():
-                            try:
-                                proc.terminate()
-                                proc.join(timeout=1)
-                                if proc.is_alive():
-                                    proc.kill()
-                            except Exception:
-                                pass
-                        pool.shutdown(wait=False, cancel_futures=True)
-                        chunk_queue.put(_SENTINEL)
-                        return
-                    fp, fid = futures[future]
-                    try:
-                        result = future.result()
-                        logger.info(f"抽出完了[大]: {fp.name}")
-                        chunk_queue.put((fp, fid, result))
-                    except Exception as e:
-                        logger.error(f"抽出エラー[大] {fp}: {e}")
-                        chunk_queue.put((fp, fid, ([], [], str(e))))
-            finally:
-                pool.shutdown(wait=False, cancel_futures=True)
-
-        chunk_queue.put(_SENTINEL)
+        try:
+            if _process_batch(small_files, _MAX_WORKERS, "小"):
+                return
+            if _process_batch(medium_files, max(2, _MAX_WORKERS // 2), "中"):
+                return
+            if _process_batch(large_files, 2, "大"):
+                return
+        finally:
+            chunk_queue.put(_SENTINEL)
 
     producer_thread = threading.Thread(target=producer, daemon=True, name="monoshiri-producer")
     producer_thread.start()
@@ -455,9 +449,17 @@ def run_indexing_pipeline(
     def embedding_worker():
         """GPU専用スレッド: 常時Embeddingを実行"""
         while True:
+            # キャンセル即時反応: キューから取る前にチェック
+            if cancel_event.is_set():
+                logger.info("[GPU] キャンセル検出 → Embedding ワーカー終了")
+                break
             try:
-                batch_data = embedding_queue.get(timeout=0.5)
+                batch_data = embedding_queue.get(timeout=0.3)
                 if batch_data is _SENTINEL:
+                    break
+                # 取り出した直後にもキャンセルチェック
+                if cancel_event.is_set():
+                    logger.info("[GPU] キャンセル検出 → バッチ破棄して終了")
                     break
 
                 texts, ids, metas = batch_data
@@ -639,12 +641,24 @@ def run_indexing_pipeline(
             if batch_texts_b:
                 submit_batch(batch_texts_b, batch_ids_b, batch_metas_b)
 
-        # Embeddingスレッドに終了信号
-        embedding_queue.put(_SENTINEL)
+        # Embeddingスレッドに終了信号（キャンセル時はキューが満杯の可能性があるので非ブロック）
+        try:
+            embedding_queue.put(_SENTINEL, timeout=1)
+        except queue.Full:
+            # キューが満杯 → 古いバッチを捨てて SENTINEL を入れる
+            try:
+                embedding_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                embedding_queue.put_nowait(_SENTINEL)
+            except queue.Full:
+                pass
         flush_hashes()
 
-        # GPU処理完了待ち
-        embedding_thread.join(timeout=300)  # 最大5分待機
+        # GPU処理完了待ち（キャンセル時は短く、正常時は最大5分）
+        join_timeout = 5 if cancelled else 300
+        embedding_thread.join(timeout=join_timeout)
 
     except CancelledError:
         cancelled = True
@@ -655,10 +669,19 @@ def run_indexing_pipeline(
         raise
     finally:
         # 全スレッドの終了を待機
-        producer_thread.join(timeout=5)
+        # キャンセル時は短いタイムアウトで即時リソース解放
+        producer_join_to = 2 if cancelled else 5
+        embedding_join_to = 3 if cancelled else 10
+        producer_thread.join(timeout=producer_join_to)
         if embedding_thread.is_alive():
             embedding_queue.put(_SENTINEL)
-            embedding_thread.join(timeout=10)
+            embedding_thread.join(timeout=embedding_join_to)
+        # embedding_queue にまだ残っているバッチを捨てる（メモリ解放）
+        try:
+            while True:
+                embedding_queue.get_nowait()
+        except queue.Empty:
+            pass
 
     # 総処理チャンク数を計算
     total_chunks = sum(embedding_results)

@@ -12,10 +12,17 @@ from pathlib import Path
 APP_DIR = Path(__file__).parent.parent
 
 # データ保存先
-# 常に ~/.monoshiri を使用する（全OS共通）
+# デフォルトは ~/.monoshiri（全OS共通）
 # 理由: Windowsでの %APPDATA% 使用時に既存データ (~/.monoshiri) と分離してしまう問題を解消。
 #       旧バージョンのデータ (chroma/, hashes/) もこのパスに存在する。
+#
+# 環境変数 MONOSHIRI_DATA_DIR が設定されている場合はそれを使用する。
+#   - テスト実行時に本番データを隔離するため
+#   - Docker / ポータブル配布で有用（デフォルト動作は変わらない）
 def _get_data_dir() -> Path:
+    env_dir = os.environ.get("MONOSHIRI_DATA_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
     return Path.home() / ".monoshiri"
 
 DATA_DIR = _get_data_dir()

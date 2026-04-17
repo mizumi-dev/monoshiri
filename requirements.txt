@@ -3,6 +3,7 @@
 
 # ─── UI ───────────────────────────────────────────────────────
 streamlit>=1.40.0
+PyQt6>=6.6.0
 
 # ─── ベクトルDB ───────────────────────────────────────────────
 chromadb>=0.5.0
@@ -29,3 +30,19 @@ huggingface_hub>=0.25.0
 
 # ─── システム情報 ─────────────────────────────────────────────
 psutil>=5.9.0
+
+# ─── GPU アクセラレーション（任意、Embedding 高速化）─────────
+# 優先順位: CUDA > DirectML > CPU（自動検出）
+#
+# ◆ Windows 全GPU汎用（推奨・配布用）:
+#     NVIDIA / AMD Radeon / Intel Arc / 内蔵GPU どれでも動作
+#     pip install torch-directml
+#     （torch 2.4.x 系にピン留め）
+#
+# ◆ NVIDIA 最速モード（オプション）:
+#     RTX シリーズで CUDA 12.x 対応
+#     pip uninstall torch -y
+#     pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# 未インストール時は自動で CPU にフォールバック
+torch>=2.4.0
