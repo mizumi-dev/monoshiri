@@ -1,0 +1,891 @@
+{
+  "fact_checking": [
+    {
+      "result": {
+        "question": "JR東日本の2021年度の売上高は？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 6,
+            "slide": null,
+            "similarity": 0.864
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 1,
+            "slide": null,
+            "similarity": 0.864
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 15,
+            "slide": null,
+            "similarity": 0.861
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 32,
+            "slide": null,
+            "similarity": 0.86
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 4,
+            "slide": null,
+            "similarity": 0.86
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 33,
+            "slide": null,
+            "similarity": 0.86
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 19,
+            "slide": null,
+            "similarity": 0.859
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 25,
+            "slide": null,
+            "similarity": 0.859
+          }
+        ],
+        "elapsed_seconds": 2.4276540279388428,
+        "expected_keywords": [
+          "売上高",
+          "2021",
+          "年度",
+          "円"
+        ],
+        "expected_file": "JR東日本_決算短信_FY2021.pdf"
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "Alphabetの2023年の営業利益は？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 57,
+            "slide": null,
+            "similarity": 0.853
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2024_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2024_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 17,
+            "slide": null,
+            "similarity": 0.845
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2023_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2023_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 3,
+            "slide": null,
+            "similarity": 0.844
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 57,
+            "slide": null,
+            "similarity": 0.844
+          },
+          {
+            "file_name": "NTT_有価証券報告書_2025半期.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\NTT_有価証券報告書_2025半期.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 27,
+            "slide": null,
+            "similarity": 0.843
+          },
+          {
+            "file_name": "NTT_統合報告書_2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\NTT_統合報告書_2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 55,
+            "slide": null,
+            "similarity": 0.843
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 15,
+            "slide": null,
+            "similarity": 0.842
+          },
+          {
+            "file_name": "花王_kao-earnings-fy2025-jp.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\花王_kao-earnings-fy2025-jp.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 6,
+            "slide": null,
+            "similarity": 0.841
+          }
+        ],
+        "elapsed_seconds": 2.065744400024414,
+        "expected_keywords": [
+          "営業利益",
+          "2023",
+          "Alphabet",
+          "million",
+          "billion"
+        ],
+        "expected_file": "Alphabet_2023-02-03.pdf"
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": false,
+        "overall_score": 60
+      }
+    },
+    {
+      "result": {
+        "question": "2022年度のJR東日本の決算短信に記載されている主要な収益源は？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 1,
+            "slide": null,
+            "similarity": 0.88
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 22,
+            "slide": null,
+            "similarity": 0.879
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 23,
+            "slide": null,
+            "similarity": 0.879
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 6,
+            "slide": null,
+            "similarity": 0.879
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 32,
+            "slide": null,
+            "similarity": 0.878
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 4,
+            "slide": null,
+            "similarity": 0.878
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 9,
+            "slide": null,
+            "similarity": 0.877
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 10,
+            "slide": null,
+            "similarity": 0.877
+          }
+        ],
+        "elapsed_seconds": 2.087050437927246,
+        "expected_keywords": [
+          "収益",
+          "運輸",
+          "事業",
+          "2022"
+        ],
+        "expected_file": "JR東日本_決算短信_FY2022.pdf"
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "Alphabetの2025年2月期の決算で最も成長した事業セグメントは？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 15,
+            "slide": null,
+            "similarity": 0.84
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 23,
+            "slide": null,
+            "similarity": 0.837
+          },
+          {
+            "file_name": "パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 38,
+            "slide": null,
+            "similarity": 0.836
+          },
+          {
+            "file_name": "パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 7,
+            "slide": null,
+            "similarity": 0.834
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 9,
+            "slide": null,
+            "similarity": 0.834
+          },
+          {
+            "file_name": "パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 30,
+            "slide": null,
+            "similarity": 0.834
+          },
+          {
+            "file_name": "日立製作所_統合報告書_2020.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\日立製作所_統合報告書_2020.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 31,
+            "slide": null,
+            "similarity": 0.833
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 17,
+            "slide": null,
+            "similarity": 0.833
+          }
+        ],
+        "elapsed_seconds": 2.102705240249634,
+        "expected_keywords": [
+          "成長",
+          "セグメント",
+          "事業",
+          "2025"
+        ],
+        "expected_file": "Alphabet_2025-02-05.pdf"
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": false,
+        "overall_score": 60
+      }
+    },
+    {
+      "result": {
+        "question": "JR東日本の2023年度の純利益は前年度比でどう変化したか？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "JR東日本_決算短信_FY2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 18,
+            "slide": null,
+            "similarity": 0.883
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 18,
+            "slide": null,
+            "similarity": 0.882
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 21,
+            "slide": null,
+            "similarity": 0.882
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 24,
+            "slide": null,
+            "similarity": 0.881
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 23,
+            "slide": null,
+            "similarity": 0.881
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.879
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 4,
+            "slide": null,
+            "similarity": 0.878
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.878
+          }
+        ],
+        "elapsed_seconds": 2.085952043533325,
+        "expected_keywords": [
+          "純利益",
+          "前年度",
+          "変化",
+          "2023"
+        ],
+        "expected_file": "JR東日本_決算短信_FY2023.pdf"
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    }
+  ],
+  "general_exploration": [
+    {
+      "result": {
+        "question": "この資料で一番よく出てくるキーワードは？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 194,
+            "slide": null,
+            "similarity": 0.805
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 86,
+            "slide": null,
+            "similarity": 0.804
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 80,
+            "slide": null,
+            "similarity": 0.802
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 36,
+            "slide": null,
+            "similarity": 0.8
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 30,
+            "slide": null,
+            "similarity": 0.799
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 177,
+            "slide": null,
+            "similarity": 0.799
+          },
+          {
+            "file_name": "NTT_有価証券報告書_2025半期.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\NTT_有価証券報告書_2025半期.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 3,
+            "slide": null,
+            "similarity": 0.799
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 189,
+            "slide": null,
+            "similarity": 0.799
+          }
+        ],
+        "elapsed_seconds": 2.0715463161468506,
+        "expected_keywords": [
+          "キーワード",
+          "頻出",
+          "多い"
+        ],
+        "expected_file": null
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "売上高が最も高い企業は？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 99,
+            "slide": null,
+            "similarity": 0.809
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 98,
+            "slide": null,
+            "similarity": 0.809
+          },
+          {
+            "file_name": "花王_kao-earnings-fy2025-jp.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\花王_kao-earnings-fy2025-jp.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 56,
+            "slide": null,
+            "similarity": 0.808
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 95,
+            "slide": null,
+            "similarity": 0.807
+          },
+          {
+            "file_name": "NTT_統合報告書_2023.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\NTT_統合報告書_2023.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 41,
+            "slide": null,
+            "similarity": 0.807
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 121,
+            "slide": null,
+            "similarity": 0.806
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 94,
+            "slide": null,
+            "similarity": 0.804
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 124,
+            "slide": null,
+            "similarity": 0.804
+          }
+        ],
+        "elapsed_seconds": 2.083862781524658,
+        "expected_keywords": [
+          "売上高",
+          "高い",
+          "企業"
+        ],
+        "expected_file": null
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "最近の決算で業績が改善した企業は？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 44,
+            "slide": null,
+            "similarity": 0.832
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2024.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2024.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 5,
+            "slide": null,
+            "similarity": 0.829
+          },
+          {
+            "file_name": "JR東日本_決算短信_FY2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\JR東日本_決算短信_FY2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 8,
+            "slide": null,
+            "similarity": 0.826
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025_SBKKソフトバンク.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 9,
+            "slide": null,
+            "similarity": 0.826
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2022.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2022.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 112,
+            "slide": null,
+            "similarity": 0.826
+          },
+          {
+            "file_name": "東京電力HD_有価証券報告書_2021.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\東京電力HD_有価証券報告書_2021.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 22,
+            "slide": null,
+            "similarity": 0.826
+          },
+          {
+            "file_name": "ソフトバンクグループ_決算短信_FY2025Q2.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\ソフトバンクグループ_決算短信_FY2025Q2.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 25,
+            "slide": null,
+            "similarity": 0.825
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2023_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2023_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 6,
+            "slide": null,
+            "similarity": 0.825
+          }
+        ],
+        "elapsed_seconds": 2.090204954147339,
+        "expected_keywords": [
+          "業績",
+          "改善",
+          "決算"
+        ],
+        "expected_file": null
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "赤字を出している企業はあるか？",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_決算プレゼン_2025Q3.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 25,
+            "slide": null,
+            "similarity": 0.815
+          },
+          {
+            "file_name": "パナソニックHD_財務データ_2025Q3.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_財務データ_2025Q3.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 20,
+            "slide": null,
+            "similarity": 0.812
+          },
+          {
+            "file_name": "パナソニックHD_財務データ_2025Q2.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\パナソニックHD_財務データ_2025Q2.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 15,
+            "slide": null,
+            "similarity": 0.812
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 203,
+            "slide": null,
+            "similarity": 0.812
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 237,
+            "slide": null,
+            "similarity": 0.812
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2023_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2023_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 27,
+            "slide": null,
+            "similarity": 0.808
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2024_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2024_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 27,
+            "slide": null,
+            "similarity": 0.808
+          },
+          {
+            "file_name": "トヨタ自動車_決算短信_2025_4Q.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_決算短信_2025_4Q.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 29,
+            "slide": null,
+            "similarity": 0.807
+          }
+        ],
+        "elapsed_seconds": 2.0636606216430664,
+        "expected_keywords": [
+          "赤字",
+          "企業"
+        ],
+        "expected_file": null
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    },
+    {
+      "result": {
+        "question": "各企業の主要な事業内容を教えて",
+        "answer": "モデルエラー: GGUFファイルが見つかりません: monoshiri-qwen35-9b\n先にモデルをダウンロードしてください。",
+        "found": true,
+        "evidence": [
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2021_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 10,
+            "slide": null,
+            "similarity": 0.858
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.855
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2025_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 10,
+            "slide": null,
+            "similarity": 0.855
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.854
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2024_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.854
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 11,
+            "slide": null,
+            "similarity": 0.854
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2022_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 12,
+            "slide": null,
+            "similarity": 0.853
+          },
+          {
+            "file_name": "トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "file_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies\\トヨタ自動車_有価証券報告書_2023_03.pdf",
+            "folder_path": "C:\\Users\\motok\\開発・IT・API\\モノシリ\\financial_reports\\japan_companies",
+            "page": 12,
+            "slide": null,
+            "similarity": 0.852
+          }
+        ],
+        "elapsed_seconds": 2.086040735244751,
+        "expected_keywords": [
+          "事業",
+          "内容",
+          "企業"
+        ],
+        "expected_file": null
+      },
+      "evaluation": {
+        "has_evidence": true,
+        "evidence_count": 8,
+        "found": true,
+        "keyword_matches": [],
+        "file_match": true,
+        "overall_score": 80
+      }
+    }
+  ]
+}

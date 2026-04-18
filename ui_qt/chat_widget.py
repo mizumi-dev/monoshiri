@@ -13,7 +13,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
-    QPushButton, QTextEdit, QLabel, QSlider, QSplitter,
+    QPushButton, QTextEdit, QLabel, QSplitter,
     QTabWidget, QListWidget, QListWidgetItem, QLineEdit,
     QFrame, QScrollArea, QSizePolicy, QGroupBox, QToolButton,
     QMessageBox,
@@ -25,7 +25,7 @@ from PyQt6.QtGui import QFont, QTextCursor, QColor, QPalette
 
 logger = logging.getLogger(__name__)
 
-from core.config import HISTORY_FILE  # MONOSHIRI_DATA_DIR 対応のため config 経由で取得
+from core.config import HISTORY_FILE, DEFAULT_SIMILARITY  # MONOSHIRI_DATA_DIR 対応のため config 経由で取得
 
 
 # ─── CSS ───────────────────────────────────────────────────────────
@@ -206,31 +206,14 @@ class ChatWidget(QWidget):
         """)
         chat_layout.addWidget(self._chat_browser, 1)
 
-        # コントロールバー（類似度スライダー）
+        # コントロールバー（チャット消去のみ）
+        # 類似度スライダーは廃止（リリース時に最適値を固定する設計）
         ctrl_bar = QFrame()
-        ctrl_bar.setFixedHeight(36)
+        ctrl_bar.setFixedHeight(32)
         ctrl_bar.setStyleSheet("background: #eef0f8; border-top: 1px solid #dde0f0;")
         ctrl_layout = QHBoxLayout(ctrl_bar)
         ctrl_layout.setContentsMargins(12, 0, 12, 0)
         ctrl_layout.setSpacing(8)
-
-        sim_lbl = QLabel("類似度閾値:")
-        sim_lbl.setStyleSheet("font-size: 11px; color: #4a5080;")
-        ctrl_layout.addWidget(sim_lbl)
-
-        self._sim_slider = QSlider(Qt.Orientation.Horizontal)
-        self._sim_slider.setMinimum(10)
-        self._sim_slider.setMaximum(90)
-        self._sim_slider.setValue(40)
-        self._sim_slider.setFixedWidth(120)
-        self._sim_slider.setStyleSheet("QSlider::groove:horizontal { height: 4px; background: #c0ccee; border-radius: 2px; } QSlider::handle:horizontal { width: 12px; height: 12px; background: #3b4a82; border-radius: 6px; margin: -4px 0; }")
-        self._sim_slider.valueChanged.connect(self._on_sim_changed)
-        ctrl_layout.addWidget(self._sim_slider)
-
-        self._sim_value_lbl = QLabel("0.40")
-        self._sim_value_lbl.setFixedWidth(32)
-        self._sim_value_lbl.setStyleSheet("font-size: 11px; color: #3b4a82;")
-        ctrl_layout.addWidget(self._sim_value_lbl)
 
         ctrl_layout.addStretch()
 
@@ -370,16 +353,6 @@ class ChatWidget(QWidget):
         folders = self._config.get("folders", [])
         self._folder_label.setText(f"📂 {len(folders)} フォルダ")
 
-    # ── 類似度スライダー ─────────────────────────────────────
-
-    @pyqtSlot(int)
-    def _on_sim_changed(self, value: int) -> None:
-        threshold = value / 100.0
-        self._sim_value_lbl.setText(f"{threshold:.2f}")
-
-    def _get_similarity(self) -> float:
-        return self._sim_slider.value() / 100.0
-
     # ── 送信・停止 ──────────────────────────────────────────
 
     @pyqtSlot()
@@ -417,15 +390,24 @@ class ChatWidget(QWidget):
         self._status_lbl.setText("⏳ 検索中...")
         self._refresh_timer.start()
 
+        # 履歴の assistant 回答から EXTERNAL_NOTICE を除去（LLMがパターン学習して
+        # 以降の回答に意図せず注意書きを繰り返し挿入する問題を防ぐ）
+        from core.rag import EXTERNAL_NOTICE
         history = [
-            {"role": m["role"], "content": m["content"]}
+            {
+                "role": m["role"],
+                "content": (
+                    m["content"].split(EXTERNAL_NOTICE)[0].rstrip()
+                    if m["role"] == "assistant" else m["content"]
+                ),
+            }
             for m in self._messages[-10:]
         ]
 
         self._worker = RagWorker(
             question=question,
             model_name=model_name,
-            similarity_threshold=self._get_similarity(),
+            similarity_threshold=DEFAULT_SIMILARITY,
             chat_history=history,
         )
         self._worker.evidence_ready.connect(self._on_evidence_ready)
@@ -605,13 +587,6 @@ class ChatWidget(QWidget):
     def _clear_chat(self) -> None:
         self._messages.clear()
         self._refresh_chat(force=True)
-
-    # ── 類似度設定をconfigから読み込む ──────────────────────
-
-    def _load_sim_from_config(self) -> None:
-        threshold = self._config.get("similarity_threshold", 0.40)
-        val = int(threshold * 100)
-        self._sim_slider.setValue(max(10, min(90, val)))
 
     # ── 履歴保存・読み込み ──────────────────────────────────
 

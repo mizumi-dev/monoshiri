@@ -18,6 +18,33 @@ from core.llm import generate_answer, stream_answer
 logger = logging.getLogger(__name__)
 
 
+# ─── 不十分回答判定パターン ───────────────────────────────────
+# LLM回答に以下のパターンが含まれる場合、「資料から十分に回答できていない」
+# と判定し、回答末尾に外部資料調査の案内を付加する。
+INSUFFICIENT_ANSWER_PATTERNS = [
+    "推測", "推察",
+    "示されていません", "示されておりません",
+    "特定できません", "特定することはできません",
+    "記述はありません", "記載はありません", "記載されていません",
+    "情報はありません", "情報が含まれていません", "情報が不足",
+    "明確ではありません", "明示されていません",
+    "答えられません", "回答できません",
+    "見つかりません", "見つかりませんでした",
+]
+
+EXTERNAL_NOTICE = (
+    "\n\n───\n"
+    "※ この回答は、読み込んでいる社内資料を元にしています。"
+    "資料内に十分な情報が含まれていない可能性があります。"
+    "必要に応じて、外部資料もご確認ください。"
+)
+
+
+def _is_insufficient_answer(answer: str) -> bool:
+    """LLM回答が「資料から十分に回答できていない」かを判定する"""
+    return any(p in answer for p in INSUFFICIENT_ANSWER_PATTERNS)
+
+
 # ─── ベクトル検索 ─────────────────────────────────────────────
 
 def search_similar(
@@ -200,13 +227,11 @@ def answer_question(
 
     if not found:
         # ADR-002修正: フォールバック廃止。関連文書なし → 正直に返す。
-        # 「それっぽい嘘」を生成するよりも「わかりません」の方が社内ツールとして信頼される。
         return {
             "answer": (
                 "ご質問に関連する文書が見つかりませんでした。\n\n"
                 "以下をご確認ください：\n"
                 "・インデックス管理画面で対象フォルダがインデックス済みか確認する\n"
-                "・類似度閾値を下げてみる（設定画面 → 類似度スライダー）\n"
                 "・別のキーワードで質問してみる"
             ),
             "evidence": [],
@@ -225,6 +250,9 @@ def answer_question(
             context=context,
             chat_history=chat_history,
         )
+        # 回答が「不十分」と判定された場合は外部資料調査の案内を付加
+        if _is_insufficient_answer(answer):
+            answer = answer.rstrip() + EXTERNAL_NOTICE
         return {
             "answer": answer,
             "evidence": evidence,
@@ -280,7 +308,6 @@ def stream_question(
             "ご質問に関連する文書が見つかりませんでした。\n\n"
             "以下をご確認ください：\n"
             "・インデックス管理画面で対象フォルダがインデックス済みか確認する\n"
-            "・類似度閾値を下げてみる（設定画面 → 類似度スライダー）\n"
             "・別のキーワードで質問してみる"
         )}
         return
@@ -293,13 +320,19 @@ def stream_question(
 
     # 3. ストリーミング推論
     try:
+        accumulated = []
         for token in stream_answer(
             model_name=model_name,
             question=question,
             context=context,
             chat_history=chat_history,
         ):
+            accumulated.append(token)
             yield {"type": "token", "data": token}
+        # 回答完了後、「不十分」判定で外部資料案内を追加トークンとして出力
+        final_answer = "".join(accumulated)
+        if _is_insufficient_answer(final_answer):
+            yield {"type": "token", "data": EXTERNAL_NOTICE}
     except Exception as e:
         import traceback as _tb
         tb_str = _tb.format_exc()
